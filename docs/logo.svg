@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="VLcut">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5cc8ff"/>
+      <stop offset="1" stop-color="#2f6bff"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#070b16"/>
+  <rect x="24" y="24" width="464" height="464" fill="none" stroke="#14213d" stroke-width="2"/>
+  <!-- V and L as two strokes, with a cut mark (a diamond, like a keyframe) at the foot of the L -->
+  <g fill="none" stroke="url(#g)" stroke-width="54" stroke-linejoin="miter" stroke-linecap="butt">
+    <path d="M70 130L150 392L230 130"/>
+    <path d="M318 112V392H452"/>
+  </g>
+  <path d="M410 444l24-24 24 24-24 24z" fill="#5cc8ff"/>
+</svg>

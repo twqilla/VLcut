@@ -1,0 +1,112 @@
+/**
+ * Runs interpolini (https://github.com/Z1xus/interpolini, GPL-3.0) for motion blur. interpolini interpolates
+ * the footage to a very high frame rate with RIFE or SVP on the graphics card and blends it back down;
+ * this module only finds the program, downloads it on request, runs it and reads its progress.
+ */
+import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
+import { createWriteStream, existsSync } from 'node:fs'
+import { mkdir, readdir, rename, rm } from 'node:fs/promises'
+import { delimiter, dirname, isAbsolute, join } from 'node:path'
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { InterpoliniStatus } from '@shared/types'
+import { type InterpoliniSettings, interpoliniArgs, parseInterpoliniLine } from '@shared/render/interpolini'
+
+const exe = process.platform === 'win32' ? 'interpolini-cli.exe' : 'interpolini-cli'
+/** The Windows build published by the project (see its README). */
+const WINDOWS_ZIP = 'https://github.com/Z1xus/interpolini/releases/latest/download/interpolini-windows-x86_64.zip'
+
+async function findIn(dir: string, depth: number): Promise<string | null> {
+  if (existsSync(join(dir, exe))) return join(dir, exe)
+  if (depth <= 0) return null
+  for (const entry of await readdir(dir, { withFileTypes: true }).catch(() => [])) {
+    if (entry.isDirectory()) {
+      const found = await findIn(join(dir, entry.name), depth - 1)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/** Looks, in order, at VLCUT_INTERPOLINI, the app's own folder for it, the install folder and the PATH. */
+export async function findInterpolini(userDir: string): Promise<string | null> {
+  const override = process.env.VLCUT_INTERPOLINI
+  if (override && existsSync(override)) return override
+  for (const dir of [join(userDir, 'interpolini'), join(process.resourcesPath ?? '', 'interpolini')]) {
+    const found = await findIn(dir, 2)
+    if (found) return found
+  }
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) if (dir && existsSync(join(dir, exe))) return join(dir, exe)
+  return null
+}
+
+export async function interpoliniStatus(userDir: string): Promise<InterpoliniStatus> {
+  const path = await findInterpolini(userDir)
+  const canAutoInstall = process.platform === 'win32'
+  if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
+  const info = await new Promise<string>((resolve) =>
+    execFile(path, ['--version'], { timeout: 20000 }, (err, stdout, stderr) => resolve(err ? `It could not be started: ${(stderr || err.message).trim().slice(0, 200)}` : stdout.trim().split('\n')[0] || 'interpolini'))
+  )
+  return { path, info, canAutoInstall }
+}
+
+/** One-time download of the program from the project's releases (Windows). */
+export async function installInterpolini(userDir: string, onProgress: (label: string, fraction: number) => void): Promise<InterpoliniStatus> {
+  if (process.platform !== 'win32') throw new Error('Automatic download is only available on Windows. Get interpolini from https://github.com/Z1xus/interpolini and put interpolini-cli on your PATH.')
+  const dir = join(userDir, 'interpolini')
+  await mkdir(dir, { recursive: true })
+  const zip = join(dir, 'interpolini.zip')
+  const res = await fetch(WINDOWS_ZIP, { redirect: 'follow' })
+  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) for ${WINDOWS_ZIP}`)
+  const total = Number(res.headers.get('content-length')) || 0
+  let got = 0
+  const body = Readable.fromWeb(res.body as never)
+  body.on('data', (chunk: Buffer) => {
+    got += chunk.length
+    if (total) onProgress('Downloading interpolini', got / total)
+  })
+  await pipeline(body, createWriteStream(`${zip}.part`))
+  await rename(`${zip}.part`, zip)
+  onProgress('Unpacking', 1)
+  await new Promise<void>((resolve, reject) => execFile('tar', ['-xf', zip, '-C', dir], (err, _o, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve())))
+  await rm(zip, { force: true })
+  return interpoliniStatus(userDir)
+}
+
+/**
+ * Blurs one clip with interpolini and returns the path of the file it made. Progress lines are passed
+ * on as they arrive. A failure is reported with interpolini's own message.
+ */
+export function runInterpolini(cli: string, clip: string, settings: InterpoliniSettings, blendFps: number, onProgress: (text: string) => void, onKill: (kill: () => void) => void): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const proc: ChildProcessWithoutNullStreams = spawn(cli, interpoliniArgs(settings, blendFps, clip), { cwd: dirname(clip) })
+    onKill(() => proc.kill())
+    let output: string | null = null
+    let failure = ''
+    let buffered = ''
+    let stderr = ''
+    const take = (line: string): void => {
+      const e = parseInterpoliniLine(line)
+      if (!e) return
+      if (e.event === 'progress') onProgress(`frame ${e.frame} of ${e.frames} (${Math.round(e.fps)} fps)`)
+      else if (e.event === 'preparing') onProgress(`preparing, ${Math.round(e.done * 100)}%`)
+      else if (e.event === 'warning' || e.event === 'info') onProgress(e.message)
+      else if (e.event === 'done') output = e.output
+      else if (e.event === 'failed') failure = e.error
+    }
+    proc.stdout.on('data', (d: Buffer) => {
+      buffered += d.toString()
+      const lines = buffered.split('\n')
+      buffered = lines.pop() ?? ''
+      lines.forEach(take)
+    })
+    proc.stderr.on('data', (d: Buffer) => (stderr = (stderr + d.toString()).slice(-1500)))
+    proc.on('error', (err) => reject(new Error(`interpolini could not be started: ${err.message}`)))
+    proc.on('close', (code) => {
+      take(buffered)
+      // The real program reports the path as it was given to it; resolve a relative one against the clip's folder.
+      if (output && !failure) return resolve(isAbsolute(output) ? output : join(dirname(clip), output))
+      reject(new Error(`interpolini failed: ${failure || stderr.trim() || `it exited with code ${code} without producing a file`}`))
+    })
+  })
+}

@@ -1,0 +1,151 @@
+name: Build Windows installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      test_signing:
+        description: Sign with a throwaway self-signed certificate to check the signing setup (the installer is not uploaded)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Bundle FFmpeg (GPL build)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg
+          Copy-Item ffmpeg/*/bin/ffmpeg.exe, ffmpeg/*/bin/ffprobe.exe resources/bin/
+          # The licence asks that the exact FFmpeg build can be traced to its source: keep its version line (it holds the source commit) with the legal files.
+          New-Item -ItemType Directory -Force -Path resources/legal | Out-Null
+          (& resources/bin/ffmpeg.exe -version | Select-Object -First 3) -join "`n" | Set-Content resources/ffmpeg-version.txt
+          Get-Content resources/ffmpeg-version.txt
+      - name: Check the real interpolini (download, version, help, trial render)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # The editor downloads this program for the user. This step shows that the download works and what the real program prints.
+          Invoke-WebRequest -Uri https://github.com/Z1xus/interpolini/releases/latest/download/interpolini-windows-x86_64.zip -OutFile interpolini.zip
+          New-Item -ItemType Directory -Force -Path interpolini-check | Out-Null
+          tar -xf interpolini.zip -C interpolini-check
+          Get-ChildItem interpolini-check -Recurse | Select-Object -First 25 | ForEach-Object { Write-Host "  $($_.FullName.Replace((Get-Location).Path, '.'))" }
+          $cli = Get-ChildItem interpolini-check -Recurse -Filter interpolini-cli.exe | Select-Object -First 1
+          if (-not $cli) { throw 'interpolini-cli.exe was not found in the download' }
+          Write-Host "--- --version"; & $cli.FullName --version
+          Write-Host "--- --help"; & $cli.FullName --help
+          Write-Host "--- trial render of a 1 second clip (this machine has no graphics card, so a failure message is expected)"
+          & resources/bin/ffmpeg.exe -y -v error -f lavfi -i testsrc=d=1:s=320x180:r=30 -pix_fmt yuv420p trial.mp4
+          & $cli.FullName -g -j -s interpolation.fps=120 -s blending.fps=30 trial.mp4
+          Write-Host "exit code: $LASTEXITCODE"
+          Get-ChildItem . -Filter 'trial*' | ForEach-Object { Write-Host "  file: $($_.Name)" }
+          Write-Host "--- the exact settings this editor sends (all of them), run against the real program"
+          Remove-Item 'trial - interpolini.mp4' -ErrorAction SilentlyContinue
+          $sent = (npx vite-node scripts/print-interpolini-args.ts trial.mp4 | Select-Object -Last 1) | ConvertFrom-Json
+          Write-Host ($sent -join ' ')
+          $reply = & $cli.FullName @sent 2>&1
+          $reply | ForEach-Object { Write-Host "  $_" }
+          Write-Host "exit code: $LASTEXITCODE"
+          if ($reply -match 'is not valid|unknown setting') { throw 'interpolini does not accept one of the settings the editor sends' }
+          if (-not (Test-Path 'trial - interpolini.mp4')) { throw 'interpolini produced no output file' }
+          Write-Host "output file exists, the real program accepted every setting"
+      - name: Third-party notices and licence texts
+        run: |
+          node scripts/gen-notices.mjs
+          Copy-Item resources/ffmpeg-version.txt resources/legal/ffmpeg-version.txt
+      - run: npm run build
+      # Signs automatically when a certificate is configured (see docs/SIGNING.md); otherwise builds unsigned.
+      - name: Build installer
+        shell: pwsh
+        env:
+          PFX: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          PFX_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+          TEST_SIGNING: ${{ inputs.test_signing }}
+        run: |
+          $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
+          $builderArgs = @('--win', 'nsis', '--publish', 'never')
+          $mode = 'unsigned'
+          if ($env:AZURE_CLIENT_SECRET -and $env:AZURE_SIGNING_ENDPOINT) {
+            $builderArgs += "-c.win.azureSignOptions.endpoint=$env:AZURE_SIGNING_ENDPOINT"
+            $builderArgs += "-c.win.azureSignOptions.codeSigningAccountName=$env:AZURE_SIGNING_ACCOUNT"
+            $builderArgs += "-c.win.azureSignOptions.certificateProfileName=$env:AZURE_SIGNING_PROFILE"
+            $mode = 'azure'
+          } elseif ($env:PFX) {
+            $env:CSC_LINK = $env:PFX
+            $env:CSC_KEY_PASSWORD = $env:PFX_PASSWORD
+            $mode = 'certificate'
+          } elseif ($env:TEST_SIGNING -eq 'true') {
+            $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=VLcut test signing (not for distribution)' -CertStoreLocation Cert:\CurrentUser\My
+            $password = ConvertTo-SecureString -String 'test' -Force -AsPlainText
+            Export-PfxCertificate -Cert $cert -FilePath test.pfx -Password $password | Out-Null
+            $env:CSC_LINK = (Resolve-Path test.pfx).Path
+            $env:CSC_KEY_PASSWORD = 'test'
+            $mode = 'test'
+          }
+          "SIGNING_MODE=$mode" >> $env:GITHUB_ENV
+          Write-Host "Signing: $mode"
+          npx electron-builder @builderArgs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Check the installer's signature
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem release/*.exe | Select-Object -First 1
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          Write-Host "Signing mode: $env:SIGNING_MODE"
+          Write-Host "Signature status: $($sig.Status)"
+          Write-Host "Signed by: $($sig.SignerCertificate.Subject)"
+          if ($env:SIGNING_MODE -eq 'unsigned') { exit 0 }
+          if ($env:SIGNING_MODE -eq 'test') {
+            # A self-signed certificate is untrusted by design; this only proves the signing steps work.
+            if ($sig.SignerCertificate.Subject -notlike '*VLcut test signing*') { throw 'The test signature is missing.' }
+            exit 0
+          }
+          if ($sig.Status -ne 'Valid') { throw "The installer is not validly signed: $($sig.Status) $($sig.StatusMessage)" }
+      - name: Source code archive (the GPL asks that the source goes with the program)
+        shell: pwsh
+        run: git archive --format=zip --prefix=vlcut-source/ -o release/VLcut-source.zip HEAD
+      # The download: a GitHub Release called "latest" (release files do not use up the repository's artifact storage).
+      - name: Publish the installer and the source as the "latest" release
+        if: env.SIGNING_MODE != 'test' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>$null
+          $global:LASTEXITCODE = 0
+          $exe = Get-ChildItem release/*.exe | Select-Object -First 1
+          gh release create latest $exe.FullName release/VLcut-source.zip --target $env:GITHUB_SHA --title "VLcut (latest build)" --notes "Windows installer and source code for the newest build ($env:GITHUB_SHA). Windows may warn that the installer is unsigned: choose More info, then Run anyway." --prerelease
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: env.SIGNING_MODE != 'test'
+        continue-on-error: true
+        with:
+          name: VLcut-Source-Code
+          path: release/VLcut-source.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: env.SIGNING_MODE != 'test'
+        continue-on-error: true
+        with:
+          name: VLcut-Windows-Installer
+          path: release/*.exe
+          if-no-files-found: error
