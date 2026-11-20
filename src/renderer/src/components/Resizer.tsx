@@ -6,7 +6,7 @@ export function usePanelSize(key: string, initial: number, min: number, max: num
     const stored = Number(localStorage.getItem(`panel:${key}`))
     return stored >= min && stored <= max ? stored : initial
   })
-  useEffect(() => localStorage.setItem(`panel:${key}`, String(size)), [key, size])
+  useEffect(() => { localStorage.setItem(`panel:${key}`, String(size)) }, [key, size])
   const resize = useCallback((delta: number) => setSize((s) => Math.min(max, Math.max(min, s + delta))), [min, max])
   return [size, resize] as const
 }

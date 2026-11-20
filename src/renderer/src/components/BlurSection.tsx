@@ -23,7 +23,7 @@ interface Props {
 export function BlurSection({ title, blendFps, clipFps, action, onBlur, blurredNote, onRemove, explain }: Props) {
   const [settings, setSettings] = useState(loadBlurSettings)
   const { busy, text, error } = useBlur()
-  useEffect(() => saveBlurSettings(settings), [settings])
+  useEffect(() => { saveBlurSettings(settings) }, [settings])
   return (
     <Section title={title}>
       {blurredNote && <p className="hint blurred-note">Blurred with interpolini: {blurredNote}.</p>}

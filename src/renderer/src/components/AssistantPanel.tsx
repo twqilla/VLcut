@@ -15,7 +15,8 @@ export function AssistantPanel() {
   const endRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => void refreshAssistantEnvironment(), [])
-  useEffect(() => endRef.current?.scrollIntoView({ block: 'end' }), [exchanges.length])
+  // Written with braces on purpose: newer browsers return a Promise from scrollIntoView, and an effect must not return one.
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end' }) }, [exchanges.length])
 
   const send = (request: string) => {
     if (!request.trim()) return

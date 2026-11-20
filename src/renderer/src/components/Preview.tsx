@@ -300,7 +300,7 @@ export function Preview() {
     player.attach(canvasRef.current)
     return () => player.attach(null)
   }, [])
-  useEffect(() => player.invalidate(), [quality, settings.width, settings.height, sourceAsset])
+  useEffect(() => { player.invalidate() }, [quality, settings.width, settings.height, sourceAsset])
 
   useEffect(() => {
     const el = stageRef.current

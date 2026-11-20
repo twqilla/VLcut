@@ -548,7 +548,7 @@ async function main() {
     const n = await win.locator('.exchange').count()
     await win.fill('textarea[aria-label="Request for the assistant"]', text)
     await win.keyboard.press('Enter')
-    await win.waitForFunction((k) => document.querySelectorAll('.exchange').length > k, n, { timeout: 20000 })
+    await win.waitForFunction((k) => document.querySelectorAll('.exchange').length > k, n, { timeout: 20000 }).catch((e) => { console.log('DBG errors', errors.slice(0, 5)); throw e })
     return win.locator('.exchange').last().textContent()
   }
   const pauses = await say('Remove all unnecessary pauses')
@@ -588,6 +588,7 @@ async function main() {
   check('assistant explains missing transcript', caps.includes('transcript'))
 
   await win.click('role=tab[name="Captions"]')
+  await win.waitForFunction(() => /one-time download|Installed and running/.test(document.querySelector('.captions-tab')?.textContent ?? ''), null, { timeout: 8000 }).catch(() => undefined)
   check('captions tab reports speech engine state', /one-time download|Installed and running/.test(await win.textContent('.captions-tab')))
   await app.evaluate(({ dialog }, p) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [p] }) }, srt)
   await win.click('button:has-text("Import .srt")')
@@ -627,6 +628,7 @@ async function main() {
   await win.waitForTimeout(600)
   check('re-styling replaces the old look', (await win.locator('.clip-adjust').count()) === 1)
   await win.click('role=tab[name="History"]')
+  await win.waitForFunction(() => document.querySelectorAll('.apply-list button').length >= 2, null, { timeout: 8000 }).catch(() => undefined)
   check('history marks assistant edits and lists restore points', (await win.locator('.history .badge').count()) >= 2 && (await win.locator('.apply-list button').count()) >= 2)
 
   // ---- Clips tab: open recordings directly, trim losslessly, send to the editor ----
@@ -1570,10 +1572,11 @@ async function main() {
     await win.click('role=tab[name="About"]')
     check('Settings has an About tab with the licence summary', (await win.locator('.about-pane').textContent()).includes('GNU General Public License'))
     await win.click('button:has-text("Third-party notices")')
+    await win.waitForFunction(() => (document.querySelector('textarea[aria-label="Third-party notices"]')?.value ?? '').includes('Third-party notices'), null, { timeout: 8000 })
     const notices = await win.inputValue('textarea[aria-label="Third-party notices"]')
     check('the third-party notices are shown inside the app', notices.includes('FFmpeg') && notices.includes('whisper.cpp') && notices.includes('@fontsource/inter'), notices.slice(0, 80))
     await win.click('button:has-text("Font licences")')
-    await win.waitForFunction(() => (document.querySelector('textarea[aria-label="Font licences"]')?.value ?? '').length > 100, null, { timeout: 5000 })
+    await win.waitForFunction(() => (document.querySelector('textarea[aria-label="Font licences"]')?.value ?? '').includes('Fonts covered'), null, { timeout: 5000 })
     check('the font licence texts are shown too', (await win.inputValue('textarea[aria-label="Font licences"]')).includes('SIL OPEN FONT LICENSE'))
     await win.click('button[aria-label="Close settings"]')
   }
