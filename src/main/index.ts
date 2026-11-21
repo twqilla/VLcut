@@ -117,7 +117,7 @@ function registerIpc(store: ProjectStore): void {
     return result.canceled || !result.filePaths[0] ? interpoliniStatus(app.getPath('userData')) : chooseInterpolini(app.getPath('userData'), result.filePaths[0])
   })
   ipcMain.handle('interpolini:status', () => interpoliniStatus(app.getPath('userData')))
-  ipcMain.handle('interpolini:install', (e) => installInterpolini(app.getPath('userData'), (label, fraction) => e.sender.send('interpolini:progress', { label, fraction })))
+  ipcMain.handle('interpolini:install', (e, version?: string) => installInterpolini(app.getPath('userData'), (label, fraction) => e.sender.send('interpolini:progress', { label, fraction }), version))
   ipcMain.handle('speech:status', () => speechStatus(speechDir))
   ipcMain.handle('speech:cancel', () => cancelSpeech())
   ipcMain.handle('speech:install', (e, model: string) => installSpeech(speechDir, model, (label, fraction) => e.sender.send('speech:progress', { label, fraction })))

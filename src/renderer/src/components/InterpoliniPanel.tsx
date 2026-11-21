@@ -27,10 +27,10 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
     return window.api.interpolini.onProgress(setProgress)
   }, [])
 
-  const install = async () => {
+  const install = async (version?: string) => {
     setProblem('')
     try {
-      setStatus(await window.api.interpolini.install())
+      setStatus(await window.api.interpolini.install(version))
     } catch (err) {
       setProblem((err as Error).message.replace(/^Error invoking remote method '[^']+': Error: /, ''))
     } finally {
@@ -51,6 +51,9 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
             {status.info}{' '}
             <button onClick={() => void window.api.interpolini.choose().then(setStatus)} title="Pick interpolini-cli.exe from a copy you installed yourself">Choose interpolini-cli.exe…</button>{' '}{status.canAutoInstall ? <button onClick={() => void install()} disabled={Boolean(progress)}>Download interpolini</button> : <span className="dim">Install it from github.com/Z1xus/interpolini and put interpolini-cli on your PATH.</span>}
           </>
+        )}
+        {status?.path && /could not be started/i.test(status.info) && status.canAutoInstall && (
+          <p><button onClick={() => void install('0.1.30')} disabled={Boolean(progress)} title="Newer builds changed how the graphics card is used. Version 0.1.30 is from 6 November.">Try the older version 0.1.30</button></p>
         )}
         {progress && <progress value={progress.fraction} max={1} aria-label={progress.label} />}
         {problem && <p className="notice small">{problem}</p>}

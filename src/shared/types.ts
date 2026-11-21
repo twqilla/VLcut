@@ -565,7 +565,7 @@ export interface Api {
     }
     status(): Promise<InterpoliniStatus>
     /** Downloads interpolini (Windows). Needs internet once. */
-    install(): Promise<InterpoliniStatus>
+    install(version?: string): Promise<InterpoliniStatus>
     choose(): Promise<InterpoliniStatus>
     onProgress(listener: (p: { label: string; fraction: number }) => void): () => void
   }

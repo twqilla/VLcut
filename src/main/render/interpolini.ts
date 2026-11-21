@@ -75,13 +75,16 @@ export async function interpoliniStatus(userDir: string): Promise<InterpoliniSta
 }
 
 /** One-time download of the program from the project's releases (Windows). */
-export async function installInterpolini(userDir: string, onProgress: (label: string, fraction: number) => void): Promise<InterpoliniStatus> {
+export async function installInterpolini(userDir: string, onProgress: (label: string, fraction: number) => void, version?: string): Promise<InterpoliniStatus> {
+  if (version !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) throw new Error('That version number is not valid.')
   if (process.platform !== 'win32') throw new Error('Automatic download is only available on Windows. Get interpolini from https://github.com/Z1xus/interpolini and put interpolini-cli on your PATH.')
-  const dir = join(userDir, 'interpolini')
+  // An older version goes into its own folder and is remembered, so the newest copy and its models stay untouched.
+  const dir = join(userDir, version ? `interpolini-${version}` : 'interpolini')
+  const url = version ? `https://github.com/Z1xus/interpolini/releases/download/v${version}/interpolini-windows-x86_64.zip` : WINDOWS_ZIP
   await mkdir(dir, { recursive: true })
   const zip = join(dir, 'interpolini.zip')
-  const res = await fetch(WINDOWS_ZIP, { redirect: 'follow' })
-  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) for ${WINDOWS_ZIP}`)
+  const res = await fetch(url, { redirect: 'follow' })
+  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) for ${url}`)
   const total = Number(res.headers.get('content-length')) || 0
   let got = 0
   const body = Readable.fromWeb(res.body as never)
@@ -94,6 +97,11 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
   onProgress('Unpacking', 1)
   await new Promise<void>((resolve, reject) => execFile('tar', ['-xf', zip, '-C', dir], (err, _o, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve())))
   await rm(zip, { force: true })
+  if (version) {
+    const found = await findIn(dir, 2)
+    if (!found) throw new Error(`The download of version ${version} did not contain ${exe}.`)
+    await writeFile(join(userDir, CHOSEN), found, 'utf8')
+  }
   return interpoliniStatus(userDir)
 }
 

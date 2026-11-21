@@ -28,7 +28,7 @@ const api: Api = {
   interpolini: {
     cfg: { list: () => ipcRenderer.invoke('cfg:list'), save: (name: string, text: string) => ipcRenderer.invoke('cfg:save', name, text), read: (name: string) => ipcRenderer.invoke('cfg:read', name), remove: (name: string) => ipcRenderer.invoke('cfg:delete', name), edit: (name: string) => ipcRenderer.invoke('cfg:edit', name) },
     status: () => ipcRenderer.invoke('interpolini:status'),
-    install: () => ipcRenderer.invoke('interpolini:install'),
+    install: (version?: string) => ipcRenderer.invoke('interpolini:install', version),
     choose: () => ipcRenderer.invoke('interpolini:choose'),
     onProgress: (listener) => {
       const handler = (_e: unknown, p: { label: string; fraction: number }): void => listener(p)
