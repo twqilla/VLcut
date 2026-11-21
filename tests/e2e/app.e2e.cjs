@@ -1479,6 +1479,31 @@ async function main() {
     check('categories switch the list', (await win.locator('.template-head:has-text("Subscribe prompt")').count()) === 1)
   }
 
+  // ---- Dragging an effect or a look from the library onto a clip in the timeline ----
+  {
+    await goHome()
+    await newProject('Drag')
+    await importFiles([clip])
+    await win.waitForSelector('.media-item')
+    await win.locator('.media-item', { hasText: 'clip.mp4' }).dblclick()
+    await win.waitForSelector('.clip-video')
+    await win.keyboard.press('Escape')
+    await win.click('role=tab[name="Effects"]')
+    check('effects can be dragged even when no clip is selected', (await win.locator('.apply-list button:text-is("Invert")').getAttribute('draggable')) === 'true')
+    await win.locator('.apply-list button:text-is("Invert")').dragTo(win.locator('.clip-video').first())
+    await win.waitForTimeout(400)
+    check('dropping an effect on a clip adds it to that clip', (await win.locator('.clip-video.selected').count()) === 1 && (await win.locator('.inspector .effect').count()) === 1, String(await win.locator('.inspector .effect').count()))
+    await win.click('role=tab[name="Looks"]')
+    await win.waitForSelector('.look-tile')
+    await win.locator('button[aria-label="Apply the Noir look"]').dragTo(win.locator('.clip-video').first())
+    await win.waitForTimeout(500)
+    check('dropping a colour look on a clip applies it', (await win.locator('.inspector .effect').count()) === 2, String(await win.locator('.inspector .effect').count()))
+    await win.evaluate(() => document.activeElement && document.activeElement.blur())
+    await win.keyboard.press('Control+z')
+    await win.keyboard.press('Control+z')
+    check('one undo step per drop', (await win.locator('.inspector .effect').count()) === 0)
+  }
+
   // ---- Nesting: several clips become one clip, and can be put back ----
   {
     await goHome()

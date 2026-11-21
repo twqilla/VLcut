@@ -5,6 +5,7 @@ import { addOverlay, applyLook, removeLooks } from '@shared/agent/tools2'
 import { overlayContext } from '../assistant'
 import { useEditor } from '../store'
 import { player, usePlayback } from '../engine/player'
+import { applyDragProps } from '../applyDrag'
 import type { Project } from '@shared/types'
 
 /** A live thumbnail: the current frame with the look applied, drawn only while the tile is on screen. */
@@ -77,7 +78,7 @@ export function LooksTab() {
           <h4>{c}</h4>
           <div className="look-grid">
             {LOOKS.filter((l) => l.category === c).map((l) => (
-              <button key={l.id} className="look-tile" aria-label={`Apply the ${l.name} look`} onClick={() => look(l.id, l.name)}>
+              <button key={l.id} className="look-tile" aria-label={`Apply the ${l.name} look`} onClick={() => look(l.id, l.name)} title="Click to apply, or drag onto a clip in the timeline" {...applyDragProps({ kind: 'look', id: l.id, name: l.name, intensity })}>
                 {!empty && <LookThumb id={l.id} intensity={intensity} project={project} selection={selected} />}
                 <span className="look-name">{l.name}</span>
               </button>

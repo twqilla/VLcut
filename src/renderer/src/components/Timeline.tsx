@@ -16,6 +16,7 @@ import { type SplitLayout, splitScreen } from '@shared/timeline/layout'
 import { clipTags, type ClipTag } from '@shared/timeline/tags'
 import { openMenu } from '../contextMenu'
 import { TEXT_MIME, clearGhost, dragPayload, useGhost } from '../dragGhost'
+import { APPLY_MIME, applyToClip, clearApplyTarget, readApplyPayload, useApplyTarget } from '../applyDrag'
 import { TEXT_PRESETS } from '../textPresets'
 import type { Project } from '@shared/types'
 
@@ -117,6 +118,7 @@ type DragMode = 'move' | 'trim-start' | 'trim-end'
 
 function ClipView({ clip, track, zoom }: { clip: Clip; track: Track; zoom: number }) {
   const selected = useEditor((s) => s.selection.includes(clip.id))
+  const dropTarget = useApplyTarget((s) => s.clipId === clip.id)
   const asset = useEditor((s) => s.project!.media.find((m) => m.id === clip.assetId))
   const drag = useRef<{ mode: DragMode; startX: number; startY: number; origStart: number; origEnd: number; moved: boolean; key: string; outside: boolean } | null>(null)
 
@@ -201,7 +203,7 @@ function ClipView({ clip, track, zoom }: { clip: Clip; track: Track; zoom: numbe
 
   return (
     <div
-      className={`clip clip-${kind} ${selected ? 'selected' : ''} ${asset?.missing ? 'missing' : ''}`}
+      className={`clip clip-${kind} ${selected ? 'selected' : ''} ${asset?.missing ? 'missing' : ''} ${dropTarget ? 'drop-target' : ''}`}
       style={{ left: clip.start * zoom, width }}
       onPointerDown={(e) => onPointerDown(e, 'move')}
       onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); clipMenu(e.clientX, e.clientY, clip, track) }}
@@ -379,6 +381,14 @@ export function Timeline() {
     e.preventDefault()
     setDropTrack(null)
     clearGhost()
+    const applying = readApplyPayload(e)
+    clearApplyTarget()
+    if (applying) {
+      const at0 = timeAt(e.clientX)
+      const hit = track.clips.find((c) => at0 >= c.start && at0 < ops.clipEnd(c))
+      if (hit) applyToClip(applying, hit.id)
+      return
+    }
     const at = ops.snapToFrame(timeAt(e.clientX), useEditor.getState().project!.settings.fps)
     const assetId = e.dataTransfer.getData(ASSET_MIME)
     if (assetId) editor.insertAsset(assetId, track.id, at)
@@ -511,13 +521,22 @@ export function Timeline() {
                 onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) seekTo(e.clientX) }}
                 onDragOver={(e) => {
                   const types = e.dataTransfer.types
+                  if (types.includes(APPLY_MIME)) {
+                    // An effect, look or transition: the clip under the pointer is outlined and gets it on drop.
+                    e.preventDefault()
+                    e.dataTransfer.dropEffect = 'copy'
+                    const at0 = timeAt(e.clientX)
+                    const hit = t.clips.find((c) => at0 >= c.start && at0 < ops.clipEnd(c))
+                    if (useApplyTarget.getState().clipId !== (hit?.id ?? null)) useApplyTarget.setState({ clipId: hit?.id ?? null })
+                    return
+                  }
                   if (types.includes(ASSET_MIME) || types.includes(TEXT_MIME)) {
                     e.preventDefault()
                     setDropTrack(t.id)
                     useGhost.setState({ trackId: t.id, time: ops.snapToFrame(timeAt(e.clientX), useEditor.getState().project!.settings.fps), duration: dragPayload.duration, label: dragPayload.label })
                   }
                 }}
-                onDragLeave={() => { setDropTrack(null); clearGhost() }}
+                onDragLeave={() => { setDropTrack(null); clearGhost(); clearApplyTarget() }}
                 onDrop={(e) => onDrop(e, t)}
               >
                 {t.clips.map((c) => (

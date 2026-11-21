@@ -20,6 +20,7 @@ import { useEffect, useRef, useState } from 'react'
 import { formatDate, mediaUrl } from '../format'
 import { TEXT_PRESETS } from '../textPresets'
 import { TEXT_MIME, clearGhost, dragPayload } from '../dragGhost'
+import { applyDragProps } from '../applyDrag'
 
 const TABS = ['Media', 'Audio', 'Styles', 'Looks', 'Text', 'Templates', 'Captions', 'Effects', 'Transitions', 'History'] as const
 type Tab = (typeof TABS)[number]
@@ -66,7 +67,7 @@ function ApplyList({ items, onPick, noun }: { items: { type: string; name: strin
         <div key={g}>
           {g && <h3>{g}</h3>}
           {shown.filter((i) => (i.group ?? '') === g).map((i) => (
-            <button key={i.type} disabled={!hasSelection} onClick={() => onPick(i.type)}>{i.name}</button>
+            <button key={i.type} className={hasSelection ? '' : 'soft-disabled'} aria-disabled={!hasSelection} onClick={() => hasSelection && onPick(i.type)} title="Click to add to the selected clip, or drag onto a clip in the timeline" {...applyDragProps({ kind: noun.includes('transition') ? 'transition' : 'effect', id: i.type, name: i.name })}>{i.name}</button>
           ))}
         </div>
       ))}
@@ -103,7 +104,7 @@ function StacksList() {
       <div className="stack-grid" title="Ready-made combinations. Click several to layer them; every effect stays adjustable in Properties.">
         {[...custom, ...EFFECT_STACKS].map((stack) => (
           <span key={stack.name} className="stack-item">
-            <button disabled={!hasSelection} onClick={() => addEffectStack(stack.name, stack.effects)} title={stack.effects.map((e) => EFFECTS.find((x) => x.type === e.type)?.name).join(' + ')}>
+            <button className={hasSelection ? '' : 'soft-disabled'} aria-disabled={!hasSelection} onClick={() => hasSelection && addEffectStack(stack.name, stack.effects)} title={`${stack.effects.map((e) => EFFECTS.find((x) => x.type === e.type)?.name).join(' + ')} · click, or drag onto a clip`} {...applyDragProps({ kind: 'stack', id: stack.name, name: stack.name, effects: stack.effects })}>
               {stack.name}
               <span className="dim"> · {stack.effects.length}</span>
             </button>
