@@ -62,23 +62,59 @@ export async function findInterpolini(userDir: string): Promise<string | null> {
   return null
 }
 
+/**
+ * Vulkan layers are add-ons that graphics drivers, overlays and capture tools install for every program that uses the graphics card.
+ * A broken one crashes interpolini the moment it starts (exit code 0xC0000005). Starting it with them switched off avoids that.
+ */
+const VK_FIX: NodeJS.ProcessEnv = { VK_LOADER_LAYERS_DISABLE: '~implicit~' }
+const VK_FLAG = 'interpolini-vulkan-layers-off.txt'
+let layersOff = false
+
+/** The environment interpolini is started with. */
+export const interpoliniEnv = (): NodeJS.ProcessEnv => ({ ...cleanEnv(), ...(layersOff ? VK_FIX : {}) })
+
+export async function loadVkFix(userDir: string): Promise<void> {
+  layersOff = existsSync(join(userDir, VK_FLAG))
+}
+
+interface Attempt { ok: boolean; info: string; code?: number }
+
+function attempt(path: string, env: NodeJS.ProcessEnv): Promise<Attempt> {
+  return new Promise((resolve) =>
+    // --help is the documented flag; the program runs from its own folder so it finds its libraries and models.
+    execFile(path, ['--help'], { timeout: 20000, cwd: dirname(path), windowsHide: true, env }, (err, stdout, stderr) => {
+      const text = `${stdout}\n${stderr}`.trim()
+      if (!err) return resolve({ ok: true, info: text.split('\n')[0].trim() || 'ready' })
+      const code = (err as { code?: unknown }).code
+      // Some builds exit with a number after printing their usage: the program ran, so it works.
+      if (typeof code === 'number' && /interpolini|usage|options/i.test(text)) return resolve({ ok: true, info: text.split('\n')[0].trim().slice(0, 120) })
+      const why = typeof code === 'number' ? explainExit(code, null) : (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'The file is missing. Download interpolini again.' : String((err as { killed?: boolean }).killed ? 'It did not answer in time.' : err.message.split('\n')[0]).slice(0, 200)
+      resolve({ ok: false, code: typeof code === 'number' ? code : undefined, info: `It could not be started. ${why} Motion blur in the export (Frame blending with Vegas weighting) works without it.${text ? ` Its own message: ${text.slice(0, 160)}` : ''}` })
+    })
+  )
+}
+
 export async function interpoliniStatus(userDir: string): Promise<InterpoliniStatus> {
   const path = await findInterpolini(userDir)
   const canAutoInstall = process.platform === 'win32'
   if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
-  const info = await new Promise<string>((resolve) =>
-    // --help is the documented flag; the program runs from its own folder so it finds its libraries and models.
-    execFile(path, ['--help'], { timeout: 20000, cwd: dirname(path), windowsHide: true, env: cleanEnv() }, (err, stdout, stderr) => {
-      const text = `${stdout}\n${stderr}`.trim()
-      if (!err) return resolve(text.split('\n')[0].trim() || 'ready')
-      // Some builds have no --version: if the program ran and printed its usage, it works.
-      if (typeof (err as { code?: unknown }).code === 'number' && /interpolini|usage|options/i.test(text)) return resolve(text.split('\n')[0].trim().slice(0, 120))
-      const code = (err as { code?: unknown }).code
-      const why = typeof code === 'number' ? explainExit(code, null) : (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'The file is missing. Download interpolini again.' : String((err as { killed?: boolean }).killed ? 'It did not answer in time.' : err.message.split('\n')[0]).slice(0, 200)
-      resolve(`It could not be started. ${why} Motion blur in the export (Frame blending with Vegas weighting) works without it.${text ? ` Its own message: ${text.slice(0, 160)}` : ''}`)
-    })
-  )
-  return { path, info, canAutoInstall }
+  let first = await attempt(path, cleanEnv())
+  if (first.ok) {
+    layersOff = false
+    await rm(join(userDir, VK_FLAG), { force: true })
+    return { path, info: first.info, canAutoInstall }
+  }
+  // A crash at start (access violation): try again without the Vulkan layers, and keep doing so if that works.
+  if (first.code !== undefined && first.code !== 1) {
+    const second = await attempt(path, { ...cleanEnv(), ...VK_FIX })
+    if (second.ok) {
+      layersOff = true
+      await writeFile(join(userDir, VK_FLAG), 'on', 'utf8')
+      return { path, info: `${second.info} · started with the graphics add-on layers switched off, because they crashed it`, canAutoInstall }
+    }
+    first = { ...first, info: `${first.info} Starting it without the graphics add-on layers did not help either.` }
+  }
+  return { path, info: first.info, canAutoInstall }
 }
 
 /** One-time download of the program from the project's releases (Windows). */
@@ -118,7 +154,7 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
  */
 export function runInterpolini(cli: string, clip: string, settings: InterpoliniSettings, blendFps: number, onProgress: (text: string) => void, onKill: (kill: () => void) => void): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc: ChildProcessWithoutNullStreams = spawn(cli, interpoliniArgs(settings, blendFps, clip), { cwd: dirname(clip), env: cleanEnv(), windowsHide: true })
+    const proc: ChildProcessWithoutNullStreams = spawn(cli, interpoliniArgs(settings, blendFps, clip), { cwd: dirname(clip), env: interpoliniEnv(), windowsHide: true })
     onKill(() => proc.kill())
     let output: string | null = null
     let failure = ''

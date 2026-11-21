@@ -855,3 +855,11 @@ button.big { font-size: 16px; padding: 14px 28px; border-radius: 12px; box-shado
 .te-more { justify-self: start; background: none; border: 0; padding: 2px 4px; color: var(--muted); font-size: 12px }
 .te-more:hover { color: var(--text, #fff) }
 .text-editor { max-height: 62%; }
+
+/* Settings tabs: Properties panel and text editor */
+.prop-tabs, .te-tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; background: var(--panel); }
+.te-tabs { position: static; padding: 0; }
+.prop-tabs button, .te-tabs button { flex: 1 1 0; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 6px 4px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font-size: 12px; min-width: 0; }
+.prop-tabs button span, .te-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prop-tabs button:hover, .te-tabs button:hover { color: var(--text, #fff); }
+.prop-tabs button.on, .te-tabs button.on { color: var(--text, #fff); border-bottom-color: var(--accent); }

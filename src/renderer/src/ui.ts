@@ -25,28 +25,31 @@ interface UiState {
   previewEdit: boolean
   /** Groups of advanced settings the person has opened (they start closed). */
   openGroups: string[]
+  /** The tab shown in the settings panel (it falls back to the first tab the clip has). */
+  propsTab: string
+  textTab: string
   /** The view of the preview (1 = the whole picture fits). Kept while clips change; separate from any clip's own scale. */
   viewZoom: number
   viewX: number
   viewY: number
 }
-const VIEW = { previewEdit: false, openGroups: [] as string[], viewZoom: 1, viewX: 0, viewY: 0 }
+const VIEW = { previewEdit: false, openGroups: [] as string[], textTab: '', viewZoom: 1, viewX: 0, viewY: 0 }
 
 function load(): UiState {
   try {
     const raw = JSON.parse(localStorage.getItem(KEY) ?? '{}')
-    return { libraryCollapsed: raw.libraryCollapsed === true, previewFocus: false, collapsedSections: Array.isArray(raw.collapsedSections) ? raw.collapsedSections.filter((s: unknown) => typeof s === 'string').slice(0, 60) : [], fitRows: raw.fitRows !== false, showTags: raw.showTags !== false, textEditorOpen: false, rangeIn: null, rangeOut: null, shortcutRequests: 0, ...VIEW }
+    return { libraryCollapsed: raw.libraryCollapsed === true, previewFocus: false, collapsedSections: Array.isArray(raw.collapsedSections) ? raw.collapsedSections.filter((s: unknown) => typeof s === 'string').slice(0, 60) : [], fitRows: raw.fitRows !== false, showTags: raw.showTags !== false, propsTab: typeof raw.propsTab === 'string' ? raw.propsTab : '', textEditorOpen: false, rangeIn: null, rangeOut: null, shortcutRequests: 0, ...VIEW }
   } catch {
-    return { libraryCollapsed: false, previewFocus: false, collapsedSections: [], fitRows: true, showTags: true, textEditorOpen: false, rangeIn: null, rangeOut: null, shortcutRequests: 0, ...VIEW }
+    return { libraryCollapsed: false, previewFocus: false, collapsedSections: [], fitRows: true, showTags: true, propsTab: '', textEditorOpen: false, rangeIn: null, rangeOut: null, shortcutRequests: 0, ...VIEW }
   }
 }
 
 export const useUi = create<UiState>(() => load())
 
 function persist(): void {
-  const { libraryCollapsed, collapsedSections, fitRows, showTags } = useUi.getState()
+  const { libraryCollapsed, collapsedSections, fitRows, showTags, propsTab } = useUi.getState()
   try {
-    localStorage.setItem(KEY, JSON.stringify({ libraryCollapsed, collapsedSections, fitRows, showTags }))
+    localStorage.setItem(KEY, JSON.stringify({ libraryCollapsed, collapsedSections, fitRows, showTags, propsTab }))
   } catch {
     // The choice still applies for this session.
   }
@@ -81,3 +84,4 @@ export const panView = (dx: number, dy: number): void => useUi.setState((s) => (
 export function toggleGroup(key: string): void {
   useUi.setState((s) => ({ openGroups: s.openGroups.includes(key) ? s.openGroups.filter((k) => k !== key) : [...s.openGroups, key] }))
 }
+export const setPropsTab = (name: string): void => { useUi.setState({ propsTab: name }); persist() }

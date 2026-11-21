@@ -324,3 +324,23 @@ test('cuts for motion blur are frame-accurate, not limited to keyframes', async 
     delete process.env.FAKE_INTERPOLINI_PASSTHROUGH
   }
 }, 120000)
+
+test('interpolini that crashes at start is retried without the graphics add-on layers, and that is remembered', async () => {
+  const { interpoliniStatus, interpoliniEnv, loadVkFix } = await import('../src/main/render/interpolini')
+  const fake = join(process.cwd(), 'tests/fake/fake-interpolini-cli.cjs')
+  process.env.VLCUT_INTERPOLINI = fake
+  process.env.FAKE_INTERPOLINI_CRASH = '1'
+  try {
+    const status = await interpoliniStatus(dir)
+    expect(status.info).toContain('switched off')
+    expect(interpoliniEnv().VK_LOADER_LAYERS_DISABLE).toBe('~implicit~')
+    await loadVkFix(dir) // a later start reads the remembered choice
+    expect(interpoliniEnv().VK_LOADER_LAYERS_DISABLE).toBe('~implicit~')
+    delete process.env.FAKE_INTERPOLINI_CRASH
+    expect((await interpoliniStatus(dir)).info).toContain('test stand-in') // it starts normally again: the layers are left on
+    expect(interpoliniEnv().VK_LOADER_LAYERS_DISABLE).toBeUndefined()
+  } finally {
+    delete process.env.FAKE_INTERPOLINI_CRASH
+    delete process.env.VLCUT_INTERPOLINI
+  }
+})

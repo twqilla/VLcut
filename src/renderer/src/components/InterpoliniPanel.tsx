@@ -15,6 +15,9 @@ interface Props {
 }
 
 /** Settings for interpolini's motion blur, under the names interpolini itself uses. */
+/** Versions offered for download: the newest, and older ones to fall back on if a newer build crashes. */
+const INTERPOLINI_VERSIONS: [string, string][] = [['0.1.34', 'newest'], ['0.1.33', 'fixes rare crashes'], ['0.1.32', 'the one from 13 November'], ['0.1.30', 'older']]
+
 export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blendLabel = "the export's frame rate" }: Props) {
   const [status, setStatus] = useState<InterpoliniStatus | null>(null)
   const [progress, setProgress] = useState<{ label: string; fraction: number } | null>(null)
@@ -27,6 +30,7 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
     return window.api.interpolini.onProgress(setProgress)
   }, [])
 
+  const [version, setVersion] = useState(INTERPOLINI_VERSIONS[2][0])
   const install = async (version?: string) => {
     setProblem('')
     try {
@@ -52,8 +56,13 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
             <button onClick={() => void window.api.interpolini.choose().then(setStatus)} title="Pick interpolini-cli.exe from a copy you installed yourself">Choose interpolini-cli.exe…</button>{' '}{status.canAutoInstall ? <button onClick={() => void install()} disabled={Boolean(progress)}>Download interpolini</button> : <span className="dim">Install it from github.com/Z1xus/interpolini and put interpolini-cli on your PATH.</span>}
           </>
         )}
-        {status?.path && /could not be started/i.test(status.info) && status.canAutoInstall && (
-          <p><button onClick={() => void install('0.1.30')} disabled={Boolean(progress)} title="Newer builds changed how the graphics card is used. Version 0.1.30 is from 6 November.">Try the older version 0.1.30</button></p>
+        {status?.canAutoInstall && (
+          <p className="version-pick">
+            <select value={version} onChange={(e) => setVersion(e.target.value)} aria-label="interpolini version" title="Install a specific version next to the current one. If a new version crashes, an older one often works.">
+              {INTERPOLINI_VERSIONS.map(([v, note]) => <option key={v} value={v}>{v}{note ? ` · ${note}` : ''}</option>)}
+            </select>
+            <button onClick={() => void install(version)} disabled={Boolean(progress)}>Install this version</button>
+          </p>
         )}
         {progress && <progress value={progress.fraction} max={1} aria-label={progress.label} />}
         {problem && <p className="notice small">{problem}</p>}

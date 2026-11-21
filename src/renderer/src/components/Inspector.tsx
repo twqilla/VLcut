@@ -9,7 +9,9 @@ import { EFFECTS, FONT_CATEGORIES, TEXT_ANIMATIONS, TEXT_OUT_ANIMATIONS, TRANSIT
 import { useEditor } from '../store'
 import { player, usePlayback, usePreviewTool } from '../engine/player'
 import { formatBytes, formatDuration } from '../format'
-import { Group, Num, Row, Section } from './fields'
+import { Num, Row, Section } from './fields'
+import { Icon, type IconName } from './Icon'
+import { setPropsTab, useUi } from '../ui'
 import { loadCustomStacks, saveCustomStacks } from './Sidebar'
 import { loadCustomFonts, useCustomFonts } from '../engine/fonts'
 import { BlurSection } from './BlurSection'
@@ -36,6 +38,16 @@ const BLEND_MODES: [string, string][] = [
   ['colorDodge', 'Colour dodge'], ['colorBurn', 'Colour burn'], ['darken', 'Darken'], ['lighten', 'Lighten'], ['difference', 'Difference'], ['exclusion', 'Exclusion'],
   ['add', 'Add'], ['hue', 'Hue'], ['saturation', 'Saturation'], ['color', 'Colour'], ['luminosity', 'Luminosity']
 ]
+
+/** Which tabs the settings panel shows for each kind of clip: [name, icon, what is on it]. */
+const TAB_SETS: Record<string, [string, string, string][]> = {
+  text: [['Text', 'type', 'Words, font, size, colour'], ['Style', 'sparkles', 'Fill, outline, shadow, glow'], ['Motion', 'play', 'How the text appears and moves'], ['Place', 'move', 'Position, size, timing'], ['Effects', 'layers', 'Effects and blending'], ['All', 'grid', 'Everything for this clip in one long list']],
+  shape: [['Shape', 'layers', 'The shape itself'], ['Place', 'move', 'Position, size, timing'], ['Effects', 'sparkles', 'Effects and blending'], ['All', 'grid', 'Everything for this clip in one long list']],
+  viz: [['Visualizer', 'sliders', 'The sound bars'], ['Place', 'move', 'Position, size, timing'], ['Effects', 'sparkles', 'Effects and blending'], ['All', 'grid', 'Everything for this clip in one long list']],
+  adjustment: [['Effects', 'sparkles', 'Effects and blending'], ['Place', 'move', 'Timing'], ['All', 'grid', 'Everything for this clip in one long list']],
+  picture: [['Place', 'move', 'Position, size, crop, mask'], ['Time', 'gauge', 'Speed, sound, fades, transition'], ['Look', 'sliders', 'Effects, colour and blending'], ['All', 'grid', 'Everything for this clip in one long list']],
+  audio: []
+}
 
 function clipLabel(c: Clip, media: { id: string; name: string }[]): string {
   if (c.text) return c.text.content.replace(/\s+/g, ' ').slice(0, 22) || 'Text'
@@ -397,6 +409,15 @@ function ClipPanel({ clip }: { clip: Clip }) {
   const hasPicture = isText || isAdjustment || Boolean(shape) || Boolean(viz) || asset?.kind !== 'audio'
   const hasSound = Boolean(asset && (asset.hasAudio || asset.kind === 'audio'))
 
+  // The settings are sorted into a few tabs by what they do, so only the ones that matter right now are on screen.
+  const kind = isText ? 'text' : shape ? 'shape' : viz ? 'viz' : isAdjustment ? 'adjustment' : asset?.kind === 'audio' ? 'audio' : 'picture'
+  const tabList = TAB_SETS[kind]
+  const storedTab = useUi((u) => u.propsTab)
+  const tab = tabList.find(([name]) => name === storedTab)?.[0] ?? tabList[0]?.[0]
+  const on = (name: string): boolean => tabList.length === 0 || tab === 'All' || tab === name
+  const picture = kind === 'picture'
+  const T = { time: picture ? 'Time' : 'Place', fades: picture ? 'Time' : 'Place', look: picture ? 'Look' : 'Effects' }
+
   /** Writes an animatable value: to the keyframe at the playhead if the property is animated, else to the base value. */
   const setProp = (prop: AnimProp, value: number) =>
     updateSelected(`Change ${prop}`, (c) => {
@@ -458,7 +479,17 @@ function ClipPanel({ clip }: { clip: Clip }) {
 
   return (
     <>
-      {text && (
+      {tabList.length > 0 && (
+        <div className="prop-tabs" role="tablist" aria-label="Settings">
+          {tabList.map(([name, icon, hint]) => (
+            <button key={name} role="tab" aria-selected={tab === name} className={tab === name ? 'on' : ''} onClick={() => setPropsTab(name)} title={hint}>
+              <Icon name={icon as IconName} size={14} />
+              <span>{name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {text && on('Text') && (
         <Section title={text.words?.length ? 'Caption' : 'Text'}>
           {text.words?.length ? (
             <div className="words">
@@ -502,6 +533,88 @@ function ClipPanel({ clip }: { clip: Clip }) {
               <option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
             </select>
           </Row>
+          <Num label="Letter spacing" value={text.letterSpacing} min={-0.1} max={0.6} step={0.005} onChange={(v) => setText({ letterSpacing: v }, 'ls')} />
+          <Num label="Line height" value={text.lineHeight} min={0.7} max={2.5} onChange={(v) => setText({ lineHeight: v }, 'lh')} />
+        </Section>
+      )}
+      {text && on('Style') && (
+        <>
+        <Section title="Fill">
+          <Row label="Fill">
+            <select value={text.fillKind ?? 'solid'} onChange={(e) => setText({ fillKind: e.target.value as TextProps['fillKind'] })} aria-label="Text fill">
+              <option value="solid">Solid colour</option><option value="gradient">Gradient</option><option value="metal">Metal</option><option value="chrome">Chrome</option><option value="gold">Gold</option><option value="image">Picture</option>
+            </select>
+          </Row>
+          {text.fillKind === 'gradient' && (
+            <>
+              <Row label="Gradient to"><input type="color" value={text.fillColor2 ?? '#ffffff'} onChange={(e) => setText({ fillColor2: e.target.value }, 'fc2')} /></Row>
+              <Num label="Gradient angle" value={text.fillAngle ?? 0} min={0} max={360} step={1} onChange={(v) => setText({ fillAngle: v }, 'fa')} />
+            </>
+          )}
+          {text.fillKind === 'image' && (
+            <Row label="Picture">
+              <select value={text.fillImage ?? ''} onChange={(e) => setText({ fillImage: e.target.value })} aria-label="Fill picture">
+                <option value="">Choose an imported image…</option>
+                {imageNames.map((n) => <option key={n}>{n}</option>)}
+              </select>
+            </Row>
+          )}
+        </Section>
+        <Section title="Outline and shadow">
+          <Num label="Outline" value={text.outlineWidth} min={0} max={0.3} step={0.005} onChange={(v) => setText({ outlineWidth: v }, 'ow')} />
+          <Row label="Outline colour"><input type="color" value={text.outlineColor} onChange={(e) => setText({ outlineColor: e.target.value }, 'oc')} /></Row>
+          <Num label="Shadow" value={text.shadow} min={0} max={1} onChange={(v) => setText({ shadow: v }, 'sh')} />
+        </Section>
+        <Section title="Glow and depth">
+          <Num label="Glow" value={text.glowAmount ?? 0} min={0} max={1} onChange={(v) => setText({ glowAmount: v }, 'ga')} />
+          {(text.glowAmount ?? 0) > 0 && <Row label="Glow colour"><input type="color" value={text.glowColor || text.color} onChange={(e) => setText({ glowColor: e.target.value }, 'gc')} /></Row>}
+          <Num label="Depth" value={text.extrudeDepth ?? 0} min={0} max={0.4} step={0.005} onChange={(v) => setText({ extrudeDepth: v }, 'ed')} />
+          {(text.extrudeDepth ?? 0) > 0 && (
+            <>
+              <Num label="Depth direction" value={text.extrudeAngle ?? 45} min={0} max={360} step={1} onChange={(v) => setText({ extrudeAngle: v }, 'ea')} />
+              <Row label="Depth colour"><input type="color" value={text.extrudeColor || '#222222'} onChange={(e) => setText({ extrudeColor: e.target.value }, 'ec')} /></Row>
+            </>
+          )}
+        </Section>
+        <Section title="Box and accents">
+          <Row label="Box">
+            <span className="checks">
+              <label><input type="checkbox" checked={Boolean(text.boxColor)} onChange={(e) => setText({ boxColor: e.target.checked ? '#000000' : '' })} /> Background</label>
+              {text.boxColor && <input type="color" value={text.boxColor.slice(0, 7)} onChange={(e) => setText({ boxColor: e.target.value }, 'bc')} />}
+            </span>
+          </Row>
+          <Row label="Accent font">
+            <select value={text.accentFontFamily} onChange={(e) => setText({ accentFontFamily: e.target.value })}>
+              {fontOptions}
+            </select>
+          </Row>
+          <Row label="Accent">
+            <span className="checks">
+              <label><input type="checkbox" checked={text.accentItalic} onChange={(e) => setText({ accentItalic: e.target.checked })} /> Italic</label>
+              <label><input type="checkbox" checked={Boolean(text.accentColor)} onChange={(e) => setText({ accentColor: e.target.checked ? text.highlightColor : '' })} /> Colour</label>
+              {text.accentColor && <input type="color" value={text.accentColor} onChange={(e) => setText({ accentColor: e.target.value }, 'ac')} />}
+            </span>
+          </Row>
+          {text.words?.length ? (
+            <>
+              <Row label="Spoken word"><input type="color" value={text.highlightColor} onChange={(e) => setText({ highlightColor: e.target.value }, 'hc')} /></Row>
+              <Row label="Word box">
+                <span className="checks">
+                  <label><input type="checkbox" checked={Boolean(text.activeWordBox)} onChange={(e) => setText({ activeWordBox: e.target.checked ? '#e23d5b' : '' })} /> On</label>
+                  {text.activeWordBox && <input type="color" value={text.activeWordBox} onChange={(e) => setText({ activeWordBox: e.target.value }, 'awb')} />}
+                </span>
+              </Row>
+              <Num label="Words shown" value={text.wordsPerPage} min={0} max={12} step={1} onChange={(v) => setText({ wordsPerPage: v }, 'wpp')} />
+            </>
+          ) : null}
+
+
+        </Section>
+        </>
+      )}
+      {text && on('Motion') && (
+        <>
+        <Section title="Animation">
           <Row label="Animation in">
             <select value={text.animation} onChange={(e) => setText({ animation: e.target.value })}>
               {TEXT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}
@@ -518,9 +631,8 @@ function ClipPanel({ clip }: { clip: Clip }) {
               {TEXT_OUT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}
             </select>
           </Row>
-          <Group title="Spacing and shape" hint="Letter spacing, line height, curved or tilted text">
-          <Num label="Letter spacing" value={text.letterSpacing} min={-0.1} max={0.6} step={0.005} onChange={(v) => setText({ letterSpacing: v }, 'ls')} />
-          <Num label="Line height" value={text.lineHeight} min={0.7} max={2.5} onChange={(v) => setText({ lineHeight: v }, 'lh')} />
+        </Section>
+        <Section title="Letter layout">
           <Row label="Layout">
             <select value={text.layout} onChange={(e) => setText({ layout: e.target.value as TextProps['layout'] })}>
               <option value="flat">Straight</option><option value="arc">Curved</option><option value="scatter">Scattered</option>
@@ -541,83 +653,11 @@ function ClipPanel({ clip }: { clip: Clip }) {
             </select>
           </Row>
           {text.distort && text.distort !== 'none' && <Num label="Distort amount" value={text.distortAmount ?? 0.5} min={0} max={1} onChange={(v) => setText({ distortAmount: v }, 'da')} />}
-          </Group>
-          <Group title="Fill" hint="Gradient, metal, gold or a picture inside the letters">
-          <Row label="Fill">
-            <select value={text.fillKind ?? 'solid'} onChange={(e) => setText({ fillKind: e.target.value as TextProps['fillKind'] })} aria-label="Text fill">
-              <option value="solid">Solid colour</option><option value="gradient">Gradient</option><option value="metal">Metal</option><option value="chrome">Chrome</option><option value="gold">Gold</option><option value="image">Picture</option>
-            </select>
-          </Row>
-          {text.fillKind === 'gradient' && (
-            <>
-              <Row label="Gradient to"><input type="color" value={text.fillColor2 ?? '#ffffff'} onChange={(e) => setText({ fillColor2: e.target.value }, 'fc2')} /></Row>
-              <Num label="Gradient angle" value={text.fillAngle ?? 0} min={0} max={360} step={1} onChange={(v) => setText({ fillAngle: v }, 'fa')} />
-            </>
-          )}
-          {text.fillKind === 'image' && (
-            <Row label="Picture">
-              <select value={text.fillImage ?? ''} onChange={(e) => setText({ fillImage: e.target.value })} aria-label="Fill picture">
-                <option value="">Choose an imported image…</option>
-                {imageNames.map((n) => <option key={n}>{n}</option>)}
-              </select>
-            </Row>
-          )}
-          </Group>
-          <Group title="Outline and shadow" hint="A line around the letters and a shadow behind them">
-          <Num label="Outline" value={text.outlineWidth} min={0} max={0.3} step={0.005} onChange={(v) => setText({ outlineWidth: v }, 'ow')} />
-          <Row label="Outline colour"><input type="color" value={text.outlineColor} onChange={(e) => setText({ outlineColor: e.target.value }, 'oc')} /></Row>
-          <Num label="Shadow" value={text.shadow} min={0} max={1} onChange={(v) => setText({ shadow: v }, 'sh')} />
-          </Group>
-          <Group title="Glow and 3D depth" hint="Neon glow and solid 3D letters">
-          <Num label="Glow" value={text.glowAmount ?? 0} min={0} max={1} onChange={(v) => setText({ glowAmount: v }, 'ga')} />
-          {(text.glowAmount ?? 0) > 0 && <Row label="Glow colour"><input type="color" value={text.glowColor || text.color} onChange={(e) => setText({ glowColor: e.target.value }, 'gc')} /></Row>}
-          <Num label="Depth" value={text.extrudeDepth ?? 0} min={0} max={0.4} step={0.005} onChange={(v) => setText({ extrudeDepth: v }, 'ed')} />
-          {(text.extrudeDepth ?? 0) > 0 && (
-            <>
-              <Num label="Depth direction" value={text.extrudeAngle ?? 45} min={0} max={360} step={1} onChange={(v) => setText({ extrudeAngle: v }, 'ea')} />
-              <Row label="Depth colour"><input type="color" value={text.extrudeColor || '#222222'} onChange={(e) => setText({ extrudeColor: e.target.value }, 'ec')} /></Row>
-            </>
-          )}
-          </Group>
-          <Group title="Background box" hint="A coloured rectangle behind the text">
-          <Row label="Box">
-            <span className="checks">
-              <label><input type="checkbox" checked={Boolean(text.boxColor)} onChange={(e) => setText({ boxColor: e.target.checked ? '#000000' : '' })} /> Background</label>
-              {text.boxColor && <input type="color" value={text.boxColor.slice(0, 7)} onChange={(e) => setText({ boxColor: e.target.value }, 'bc')} />}
-            </span>
-          </Row>
-          </Group>
-          <Group title="Accent words" hint="Special look for words you put between *stars*">
-          <Row label="Accent font">
-            <select value={text.accentFontFamily} onChange={(e) => setText({ accentFontFamily: e.target.value })}>
-              {fontOptions}
-            </select>
-          </Row>
-          <Row label="Accent">
-            <span className="checks">
-              <label><input type="checkbox" checked={text.accentItalic} onChange={(e) => setText({ accentItalic: e.target.checked })} /> Italic</label>
-              <label><input type="checkbox" checked={Boolean(text.accentColor)} onChange={(e) => setText({ accentColor: e.target.checked ? text.highlightColor : '' })} /> Colour</label>
-              {text.accentColor && <input type="color" value={text.accentColor} onChange={(e) => setText({ accentColor: e.target.value }, 'ac')} />}
-            </span>
-          </Row>
-          </Group>
-          {text.words?.length ? (
-            <>
-              <Row label="Spoken word"><input type="color" value={text.highlightColor} onChange={(e) => setText({ highlightColor: e.target.value }, 'hc')} /></Row>
-              <Row label="Word box">
-                <span className="checks">
-                  <label><input type="checkbox" checked={Boolean(text.activeWordBox)} onChange={(e) => setText({ activeWordBox: e.target.checked ? '#e23d5b' : '' })} /> On</label>
-                  {text.activeWordBox && <input type="color" value={text.activeWordBox} onChange={(e) => setText({ activeWordBox: e.target.value }, 'awb')} />}
-                </span>
-              </Row>
-              <Num label="Words shown" value={text.wordsPerPage} min={0} max={12} step={1} onChange={(v) => setText({ wordsPerPage: v }, 'wpp')} />
-            </>
-          ) : null}
-
         </Section>
+        </>
       )}
 
-      {shape && (
+      {shape && on('Shape') && (
         <Section title="Shape">
           <Row label="Kind">
             <select value={shape.kind} onChange={(e) => setShape({ kind: e.target.value as ShapeProps['kind'] })}>
@@ -651,7 +691,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {hasPicture && (
+      {hasPicture && on('Place') && (
         <Section title="Transform" actions={<button onClick={() => updateSelected('Reset transform', () => ({ transform: { x: 0, y: 0, scale: 1, rotation: 0 }, keyframes: {} }))}>Reset</button>}>
           {anim('x', 'Position X', -1.5, 1.5, 0.005)}
           {anim('y', 'Position Y', -1.5, 1.5, 0.005)}
@@ -661,7 +701,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {asset && asset.kind !== 'audio' && (
+      {asset && asset.kind !== 'audio' && on('Place') && (
         <Section title="Crop">
           {(['left', 'right', 'top', 'bottom'] as const).map((edge) => (
             <Num key={edge} label={edge[0].toUpperCase() + edge.slice(1)} value={clip.crop[edge]} min={0} max={0.9} onChange={(v) => updateSelected('Crop', (c) => ({ crop: { ...c.crop, [edge]: v } }), `crop-${edge}`)} />
@@ -669,7 +709,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {hasPicture && !isAdjustment && (
+      {hasPicture && !isAdjustment && on('Place') && (
         <Section title="Mask" actions={<label><input type="checkbox" aria-label="Enable mask" checked={Boolean(clip.mask)} onChange={(e) => updateSelected(e.target.checked ? 'Add mask' : 'Remove mask', () => ({ mask: e.target.checked ? { ...DEFAULT_MASK } : undefined }))} /> On</label>}>
           {clip.mask ? (
             <>
@@ -719,7 +759,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {asset && asset.kind !== 'image' && (
+      {asset && asset.kind !== 'image' && on(T.time) && (
         <Section title="Speed">
           <Num label="Speed" value={clip.speed} min={0.1} max={16} step={0.05} onChange={(v) => apply('Change speed', (p) => ops.setClipSpeed(p, clip.id, v), { coalesce: 'speed' })} />
           <Row label="Direction">
@@ -735,7 +775,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
 
       {hasPicture && !isText && !shape && !isAdjustment && <ClipBlur clip={clip} />}
 
-      {viz && (
+      {viz && on('Visualizer') && (
         <Section title="Audio visualizer">
           <Row label="Style">
             <select value={viz.style} aria-label="Visualizer style" onChange={(e) => setViz({ style: e.target.value as VizProps['style'] })}>
@@ -752,23 +792,25 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {hasSound && (
+      {hasSound && on(T.time) && (
         <Section title="Audio">
           {asset?.kind === 'video' && <Row label="Sound"><label><input type="checkbox" aria-label="Remove audio from this clip" checked={Boolean(clip.muted)} onChange={(e) => updateSelected(e.target.checked ? 'Remove audio' : 'Restore audio', () => ({ muted: e.target.checked || undefined }))} /> Remove this clip's audio</label></Row>}
           {!clip.muted && anim('volume', 'Volume', 0, 2)}
         </Section>
       )}
 
-      {hasSound && !clip.muted && !clip.freeze && <AudioFxSection clip={clip} />}
+      {hasSound && !clip.muted && !clip.freeze && on(T.time) && <AudioFxSection clip={clip} />}
 
-      <Section title="Fades">
+      {on(T.fades) && (
+        <Section title="Fades">
         <Num label="Fade in" value={clip.fadeIn} min={0} max={Math.min(10, clip.duration)} step={0.05} onChange={(v) => updateSelected('Fade in', () => ({ fadeIn: v }), 'fadeIn')} />
         <Num label="Fade out" value={clip.fadeOut} min={0} max={Math.min(10, clip.duration)} step={0.05} onChange={(v) => updateSelected('Fade out', () => ({ fadeOut: v }), 'fadeOut')} />
-      </Section>
+        </Section>
+      )}
 
-      {asset?.kind === 'video' && <MotionSection clip={clip} />}
+      {asset?.kind === 'video' && on('Place') && <MotionSection clip={clip} />}
 
-      {hasPicture && (
+      {hasPicture && on(T.look) && (
         <Section title="Compositing">
           <Row label="Blend mode">
             <select value={clip.blend ?? 'normal'} aria-label="Blend mode" onChange={(e) => updateSelected('Blend mode', () => ({ blend: e.target.value === 'normal' ? undefined : (e.target.value as BlendMode) }))}>
@@ -809,7 +851,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {hasPicture && (
+      {hasPicture && on(T.time) && (
         <Section title="Transition in">
           <Row label="Type">
             <select value={clip.transitionIn?.type ?? ''} onChange={(e) => updateSelected('Set transition', (c) => ({ transitionIn: e.target.value ? { type: e.target.value, duration: c.transitionIn?.duration ?? 0.5 } : undefined }))}>
@@ -842,7 +884,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {hasPicture && (
+      {hasPicture && on(T.look) && (
         <Section
           title="Effects"
           actions={

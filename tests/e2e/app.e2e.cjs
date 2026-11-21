@@ -46,6 +46,9 @@ async function main() {
   const packaged = process.env.E2E_APP
   const app = await _electron.launch({ executablePath: packaged || require(path.join(root, 'node_modules/electron')), args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--user-data-dir=${path.join(work, 'ud')}`, ...(packaged ? [] : [root])], cwd: root, env: { ...process.env, VLCUT_PART_FRAMES: '30', OLLAMA_HOST: `127.0.0.1:${ollama.address().port}`, VLCUT_INTERPOLINI: path.join(root, 'tests/fake/fake-interpolini-cli.cjs'), FAKE_INTERPOLINI_LOG: path.join(work, 'interpolini-calls.log') } })
   const win = await app.firstWindow()
+  // The existing checks reach every setting, so they run with the "All" tab; the tab behaviour itself is checked below.
+  await win.evaluate(() => { const k = 'vlcut:ui'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o.propsTab = 'All'; localStorage.setItem(k, JSON.stringify(o)) })
+  await win.reload()
   const errors = []
   win.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
   win.on('pageerror', (e) => errors.push(String(e)))
@@ -177,6 +180,17 @@ async function main() {
   await win.locator('.clip-video').first().click()
   await win.waitForSelector('[aria-label="Selection outline"]')
   check('a selected clip shows only an outline until Edit position is on', (await win.locator('[aria-label="Scale handle bottom-right"]').count()) === 0 && (await win.locator('.sel-handles').count()) === 1)
+  {
+    const tabs = win.locator('.prop-tabs [role=tab]')
+    check('a video clip has Place, Time and Look tabs (and All)', (await tabs.count()) === 4)
+    await win.click('.prop-tabs [role=tab]:has-text("Place")')
+    check('Place shows position, scale and crop, not speed or effects', (await win.locator('.inspector .section h3:text-is("Transform")').count()) === 1 && (await win.locator('.inspector .section h3:text-is("Speed")').count()) === 0 && (await win.locator('.inspector .section h3:text-is("Effects")').count()) === 0)
+    await win.click('.prop-tabs [role=tab]:has-text("Time")')
+    check('Time shows speed and fades, not the transform', (await win.locator('.inspector .section h3:text-is("Speed")').count()) === 1 && (await win.locator('.inspector .section h3:text-is("Fades")').count()) === 1 && (await win.locator('.inspector .section h3:text-is("Transform")').count()) === 0)
+    await win.click('.prop-tabs [role=tab]:has-text("Look")')
+    check('Look shows the effects list', (await win.locator('.inspector .section h3:text-is("Effects")').count()) === 1 && (await win.locator('.inspector .section h3:text-is("Transform")').count()) === 0)
+    await win.click('.prop-tabs [role=tab]:has-text("All")')
+  }
   {
     // With editing off, dragging or scrolling on the picture never moves the clip; the wheel zooms the view and the zoom stays.
     const cb0 = await win.locator('.preview canvas').boundingBox()
@@ -342,10 +356,16 @@ async function main() {
   check('text clip added', (await win.locator('.clip-text').count()) === 1)
   // Every text animation, fill, distortion and treatment draws without errors.
   await win.click('.clip-text')
-  check('advanced text settings start folded away in groups', (await win.locator('.group-toggle').count()) >= 5 && (await win.locator('.group.open').count()) === 0 && (await win.locator('.inspector .field:has-text("Font size")').count()) === 1)
-  check('settings explain themselves in a tooltip', ((await win.getAttribute('.inspector label.field:has-text("Font size")', 'title')) || '').length > 10)
-  const openGroups = async () => { while ((await win.locator('.group-toggle[aria-expanded="false"]').count()) > 0) await win.locator('.group-toggle[aria-expanded="false"]').first().click() }
-  await openGroups()
+  check('the settings of a text clip are sorted into tabs (with an All tab for the long list)', (await win.locator('.prop-tabs [role=tab]').count()) === 6 && (await win.locator('.prop-tabs [role=tab]:has-text("All")').getAttribute('aria-selected')) === 'true')
+  await win.click('.prop-tabs [role=tab]:has-text("Text")')
+  check('the Text tab shows words, font, size and colour but not the effects settings', (await win.locator('.inspector .field:has-text("Font size")').count()) === 1 && (await win.locator('.inspector .field:has-text("Outline")').count()) === 0 && (await win.locator('.inspector .section h3:text-is("Effects")').count()) === 0)
+  await win.click('.prop-tabs [role=tab]:has-text("Style")')
+  check('the Style tab shows fill, outline, shadow and glow', (await win.locator('.inspector .field:has-text("Outline")').count()) >= 1 && (await win.locator('.inspector .field:has-text("Font size")').count()) === 0)
+  await win.click('.prop-tabs [role=tab]:has-text("Motion")')
+  check('the Motion tab shows the animations and the letter layout', (await win.locator('.inspector .field:has-text("Animation in")').count()) === 1 && (await win.locator('.inspector .field:has-text("Layout")').count()) >= 1)
+  check('settings explain themselves in a tooltip', ((await win.getAttribute('.inspector label.field:has-text("Animation in")', 'title')) || '').length > 10)
+  await win.click('.prop-tabs [role=tab]:has-text("All")')
+  const openGroups = async () => {}
   const anim = win.locator('select:has(option[value="splitText"])').first()
   const errorsBeforeText = errors.length
   for (const value of await anim.locator('option').evaluateAll((os) => os.map((o) => o.value))) {
@@ -1528,26 +1548,31 @@ async function main() {
     await win.click('.tile:has-text("Headline")')
     await win.waitForSelector('.text-editor', { timeout: 5000 })
     check('adding text opens the text editor window over the preview', (await win.locator('.text-editor').count()) === 1)
-    check('the text editor keeps the rarely used settings behind "More options"', (await win.locator('.text-editor .te-looks').count()) === 0 && (await win.locator('.text-editor input[aria-label="Starts at"]').count()) === 0)
-    await win.click('.text-editor .te-more')
-    check('More options shows quick styles, position and timing', (await win.locator('.text-editor .te-looks').count()) === 1 && (await win.locator('.text-editor input[aria-label="Starts at"]').count()) === 1)
+    const teTab = (name) => win.click(`.text-editor [role=tab]:has-text("${name}")`)
+    check('the text editor is sorted into tabs and starts on the text itself', (await win.locator('.text-editor [role=tab]').count()) === 4 && (await win.locator('.text-editor textarea[aria-label="Text"]').count()) === 1 && (await win.locator('.text-editor .te-looks').count()) === 0 && (await win.locator('.text-editor input[aria-label="Starts at"]').count()) === 0)
     await win.fill('.text-editor textarea[aria-label="Text"]', 'Fresh words')
     check('typing in the editor changes the text on the timeline', (await win.locator('.clip-text', { hasText: 'Fresh words' }).count()) === 1)
+    check('Font size is a plain number of points', (await win.locator('.text-editor input[aria-label="Font size"]').count()) === 1 && Number(await win.inputValue('.text-editor input[aria-label="Font size"]')) >= 8)
     await win.selectOption('.text-editor select[aria-label="Font"]', 'Anton')
+    await teTab('Style')
+    check('the Style tab has the quick styles, outline and shadow', (await win.locator('.text-editor .te-looks').count()) === 1 && (await win.locator('.text-editor input[aria-label="Outline"]').count()) === 1 && (await win.locator('.text-editor textarea').count()) === 0)
     await win.click('.text-editor .te-looks button:has-text("Neon sign")')
+    await teTab('Place')
     await win.click('.text-editor button:text-is("Top")')
     await win.fill('.text-editor input[aria-label="Starts at"]', '1')
     await win.fill('.text-editor input[aria-label="Lasts"]', '2')
     await win.waitForTimeout(300)
-    check('the editor sets font, look, position and timing', (await win.inputValue('.text-editor input[aria-label="Starts at"]')) === '1' && (await win.inputValue('.text-editor input[aria-label="Lasts"]')) === '2' && (await win.inputValue('.text-editor select[aria-label="Font"]')) === 'Orbitron', await win.inputValue('.text-editor select[aria-label="Font"]'))
+    check('the Place tab sets position and timing', (await win.inputValue('.text-editor input[aria-label="Starts at"]')) === '1' && (await win.inputValue('.text-editor input[aria-label="Lasts"]')) === '2')
+    await teTab('Text')
+    check('the editor sets font and look', (await win.inputValue('.text-editor select[aria-label="Font"]')) === 'Orbitron', await win.inputValue('.text-editor select[aria-label="Font"]'))
     // Typed out: adjustable typing time and a blinking cursor.
+    await teTab('Motion')
     check('Typed out options are hidden for other animations', (await win.locator('.text-editor input[aria-label="Typing time"]').count()) === 0)
     await win.selectOption('.text-editor select[aria-label="Animation in"]', 'typewriter')
     await win.waitForSelector('.text-editor input[aria-label="Typing time"]')
     await win.fill('.text-editor input[aria-label="Typing time"]', '1')
     await win.waitForTimeout(200)
     check('Typed out has a typing time and a blinking cursor switch', (await win.inputValue('.text-editor input[aria-label="Typing time"]')) === '1' && (await win.locator('.text-editor input[aria-label="Blinking cursor"]').isChecked()))
-    check('Font size is a plain number of points', (await win.locator('.text-editor input[aria-label="Font size"]').count()) === 1 && Number(await win.inputValue('.text-editor input[aria-label="Font size"]')) >= 8)
     await win.click('button[aria-label="Close text editor"]')
     check('the editor can be closed', (await win.locator('.text-editor').count()) === 0)
     await win.locator('.clip-text').first().dblclick()

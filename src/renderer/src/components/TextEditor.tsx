@@ -7,7 +7,9 @@ import { useEditor } from '../store'
 import { player } from '../engine/player'
 import { useCustomFonts } from '../engine/fonts'
 import { setTextEditor, toggleGroup, useUi } from '../ui'
+import { Icon, type IconName } from './Icon'
 
+const TE_TABS: [string, string, string][] = [['Text', 'type', 'Words, font, size, colour'], ['Style', 'sparkles', 'Quick styles, outline, shadow'], ['Motion', 'play', 'How the text appears and leaves'], ['Place', 'move', 'Position and timing']]
 const LOOK_BUTTONS = ['title', 'subtitle', 'neon', 'gold', 'chrome', 'outline', 'comic', 'retro', 'handwritten', 'meme', 'minimal', 'glitch']
 
 /**
@@ -21,13 +23,15 @@ export function TextEditor() {
   const trackId = useEditor((s) => (s.selection.length === 1 ? ops.findClip(s.project!, s.selection[0])?.track.id : undefined))
   const customFonts = useCustomFonts((s) => s.names)
   const area = useRef<HTMLTextAreaElement>(null)
-  const more = useUi((s) => s.openGroups.includes('text-editor-more'))
+  const teTabStored = useUi((s) => s.textTab)
   const small = useUi((s) => s.openGroups.includes('text-editor-small'))
   const clip: Clip | undefined = selected?.text ? selected : undefined
   const id = clip?.id
   // The words are selected when the editor opens for a clip, so typing replaces the placeholder.
-  useEffect(() => { if (open && id) { area.current?.focus(); area.current?.select() } }, [open, id])
+  useEffect(() => { if (open && id) { useUi.setState({ textTab: 'Text' }); setTimeout(() => { area.current?.focus(); area.current?.select() }, 0) } }, [open, id])
   if (!open || !clip || !trackId) return null
+  const teTab = teTabStored || 'Text'
+  const setTeTab = (name: string): void => useUi.setState({ textTab: name })
   const t = clip.text!
   const set = (patch: Partial<TextProps>, key = 'text-edit'): void => useEditor.getState().updateSelected('Edit text', () => ({ text: { ...t, ...patch } }), key)
   const apply = useEditor.getState().apply
@@ -46,6 +50,16 @@ export function TextEditor() {
       </header>
       {!small && (
         <>
+          <div className="te-tabs" role="tablist" aria-label="Text settings">
+            {TE_TABS.filter(([name]) => !(isCaption && name === 'Motion')).map(([name, icon, hint]) => (
+              <button key={name} role="tab" aria-selected={teTab === name} className={teTab === name ? 'on' : ''} onClick={() => setTeTab(name)} title={hint}>
+                <Icon name={icon as IconName} size={14} />
+                <span>{name}</span>
+              </button>
+            ))}
+          </div>
+          {teTab === 'Text' && (
+            <>
       <textarea ref={area} aria-label="Text" rows={3} value={t.content} onChange={(e) => set({ content: e.target.value })} placeholder="Type your text" />
       <div className="te-row">
         <select aria-label="Font" title="The typeface of the text" value={t.fontFamily} onChange={(e) => set({ fontFamily: e.target.value })}>
@@ -61,28 +75,38 @@ export function TextEditor() {
         <button className={t.uppercase ? 'on' : ''} aria-pressed={t.uppercase} title="ALL CAPITALS" aria-label="Capitals" onClick={() => set({ uppercase: !t.uppercase })}>AA</button>
         {(['left', 'center', 'right'] as const).map((a) => <button key={a} className={t.align === a ? 'on' : ''} aria-pressed={t.align === a} aria-label={`Align ${a}`} onClick={() => set({ align: a })}>{a === 'left' ? '⟸' : a === 'center' ? '≡' : '⟹'}</button>)}
       </div>
-      {!isCaption && t.animation === 'typewriter' && (
-        <div className="te-row" role="group" aria-label="Typed out">
-          <label className="te-inline">Typing time <input type="number" aria-label="Typing time" min={0.2} max={60} step={0.1} value={t.typeSeconds ?? Math.round(Math.max(0.2, [...t.content].length / 26) * 10) / 10} onChange={(e) => set({ typeSeconds: Math.min(60, Math.max(0.2, Number(e.target.value) || 1)) })} title="Seconds the whole text takes to type out" /> s</label>
-          <label className="te-inline"><input type="checkbox" aria-label="Blinking cursor" checked={t.typeCursor !== false} onChange={(e) => set({ typeCursor: e.target.checked })} /> Blinking cursor</label>
-        </div>
-      )}
+            </>
+          )}
+          {teTab === 'Style' && (
+            <>
+      <div className="te-looks" role="group" aria-label="Looks" title="Quick styles: one click sets font, colour and effects together">
+        {LOOK_BUTTONS.map((l) => <button key={l} onClick={() => set({ ...TEXT_LOOKS[l].look, content: t.content, fontSize: t.fontSize }, 'text-look')} title={`Give the text the ${TEXT_LOOKS[l].name} look`}>{TEXT_LOOKS[l].name}</button>)}
+      </div>
+      <div className="te-row">
+        <label className="te-inline" title="A line around each letter">Outline <input type="range" aria-label="Outline" min={0} max={0.15} step={0.005} value={t.outlineWidth} onChange={(e) => set({ outlineWidth: Number(e.target.value) })} /></label>
+        <label className="te-inline" title="A dark shadow behind the text so it is easier to read">Shadow <input type="range" aria-label="Shadow" min={0} max={1} step={0.05} value={t.shadow} onChange={(e) => set({ shadow: Number(e.target.value) })} /></label>
+          </div>
+
+            </>
+          )}
+          {teTab === 'Motion' && !isCaption && (
+            <>
       {!isCaption && (
         <div className="te-row">
           <label className="te-inline" title="How the text arrives on screen">Appears <select aria-label="Animation in" value={t.animation} onChange={(e) => set({ animation: e.target.value })}>{TEXT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}</select></label>
           <label className="te-inline" title="How the text leaves the screen">Leaves <select aria-label="Animation out" value={t.animationOut ?? 'none'} onChange={(e) => set({ animationOut: e.target.value === 'none' ? undefined : e.target.value })}><option value="none">None</option>{TEXT_OUT_ANIMATIONS.filter((a) => a.type !== 'none').map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}</select></label>
         </div>
       )}
-      <button type="button" className="te-more" aria-expanded={more} onClick={() => toggleGroup('text-editor-more')} title="Outline, shadow, quick styles, position and timing">{more ? '▾' : '▸'} More options</button>
-      {more && (
-        <>
-          <div className="te-row">
-        <label className="te-inline" title="A line around each letter">Outline <input type="range" aria-label="Outline" min={0} max={0.15} step={0.005} value={t.outlineWidth} onChange={(e) => set({ outlineWidth: Number(e.target.value) })} /></label>
-        <label className="te-inline" title="A dark shadow behind the text so it is easier to read">Shadow <input type="range" aria-label="Shadow" min={0} max={1} step={0.05} value={t.shadow} onChange={(e) => set({ shadow: Number(e.target.value) })} /></label>
-          </div>
-      <div className="te-looks" role="group" aria-label="Looks" title="Quick styles: one click sets font, colour and effects together">
-        {LOOK_BUTTONS.map((l) => <button key={l} onClick={() => set({ ...TEXT_LOOKS[l].look, content: t.content, fontSize: t.fontSize }, 'text-look')} title={`Give the text the ${TEXT_LOOKS[l].name} look`}>{TEXT_LOOKS[l].name}</button>)}
-      </div>
+      {!isCaption && t.animation === 'typewriter' && (
+        <div className="te-row" role="group" aria-label="Typed out">
+          <label className="te-inline">Typing time <input type="number" aria-label="Typing time" min={0.2} max={60} step={0.1} value={t.typeSeconds ?? Math.round(Math.max(0.2, [...t.content].length / 26) * 10) / 10} onChange={(e) => set({ typeSeconds: Math.min(60, Math.max(0.2, Number(e.target.value) || 1)) })} title="Seconds the whole text takes to type out" /> s</label>
+          <label className="te-inline"><input type="checkbox" aria-label="Blinking cursor" checked={t.typeCursor !== false} onChange={(e) => set({ typeCursor: e.target.checked })} /> Blinking cursor</label>
+        </div>
+      )}
+            </>
+          )}
+          {teTab === 'Place' && (
+            <>
       <div className="te-row">
         <span title="Where the text sits in the picture">Position</span>
         <button onClick={() => place(-0.34)}>Top</button><button onClick={() => place(0)}>Middle</button><button onClick={() => place(0.34)}>Bottom</button>
@@ -95,6 +119,8 @@ export function TextEditor() {
         <button onClick={() => apply('Text starts here', (p) => ops.moveClip(p, clip.id, trackId, player.time))} title="Move the text so it starts at the playhead">Start at playhead</button>
         <button onClick={() => apply('Text ends here', (p) => ops.trimClipEnd(p, clip.id, Math.max(clip.start + 0.2, player.time)))} title="Make the text end at the playhead">End at playhead</button>
       </div>
+            </>
+          )}
         </>
       )}
       <div className="te-row">
@@ -102,8 +128,6 @@ export function TextEditor() {
         <button onClick={() => useEditor.getState().duplicateSelection()}>Duplicate</button>
         <button className="danger" aria-label="Delete text" onClick={() => { useEditor.getState().deleteSelection(); setTextEditor(false) }}>Delete</button>
       </div>
-        </>
-      )}
     </div>
   )
 }

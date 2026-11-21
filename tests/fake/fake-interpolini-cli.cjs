@@ -10,6 +10,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const args = process.argv.slice(2)
+// Stands in for a broken graphics add-on layer: the program crashes at start unless the layers are switched off.
+if (process.env.FAKE_INTERPOLINI_CRASH && !process.env.VK_LOADER_LAYERS_DISABLE) process.exit(5)
 if (args.includes('--version') || args.includes('--help')) { console.log('interpolini 0.0.0 (test stand-in)'); process.exit(0) }
 if (process.env.FAKE_INTERPOLINI_LOG) fs.appendFileSync(process.env.FAKE_INTERPOLINI_LOG, JSON.stringify(args) + '\n')
 
