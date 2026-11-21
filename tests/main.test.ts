@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, expect, test } from 'vitest'
@@ -375,4 +375,24 @@ test('word times from speech recognition are put in order, spread and trimmed so
   const normal = refineWordTimes([{ text: 'This', start: 0, end: 0.3 }, { text: 'is', start: 0.3, end: 0.5 }, { text: 'fine', start: 0.5, end: 0.9 }])
   expect(normal.map((w) => [w.start, w.end])).toEqual([[0, 0.3], [0.3, 0.5], [0.5, 0.9]])
   expect(shiftWords(normal, -0.05).map((w) => w.start)).toEqual([0, 0.25, 0.45])
+})
+
+test('a broken copy of interpolini is skipped in favour of one that starts', async () => {
+  const { resolveInterpolini } = await import('../src/main/render/interpolini')
+  const userDir = join(dir, 'resolve-user')
+  const fake = join(process.cwd(), 'tests/fake/fake-interpolini-cli.cjs')
+  const broken = join(userDir, 'interpolini', 'interpolini-windows-x86_64', 'interpolini-cli')
+  const good = join(userDir, 'interpolini-0.1.30', 'interpolini-cli')
+  for (const f of [broken, good]) mkdirSync(join(f, '..'), { recursive: true })
+  writeFileSync(broken, '#!/bin/sh\nexit 5\n')
+  writeFileSync(good, `#!/bin/sh\nexec node "${fake}" "$@"\n`)
+  chmodSync(broken, 0o755)
+  chmodSync(good, 0o755)
+  delete process.env.VLCUT_INTERPOLINI
+  const found = await resolveInterpolini(userDir)
+  expect(found.path).toBe(good)
+  expect(found.info).toContain('test stand-in')
+  expect(found.info).toContain('another copy was skipped')
+  rmSync(userDir, { recursive: true, force: true })
+  expect((await resolveInterpolini(join(dir, 'nothing-here'))).path).toBeNull()
 })

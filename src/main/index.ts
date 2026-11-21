@@ -29,7 +29,7 @@ import { makeProxy } from './media/proxy'
 import { exportLossless } from './render/lossless'
 import { losslessPlan } from '@shared/render/lossless'
 import { IMPORT_FILTERS, VIDEO_EXTENSIONS as VIDEO_TYPES } from '@shared/mediaTypes'
-import { chooseInterpolini, findInterpolini, installInterpolini, interpoliniStatus, loadVkFix, missingLibraries } from './render/interpolini'
+import { chooseInterpolini, findInterpolini, installInterpolini, interpoliniStatus, loadVkFix, missingLibraries, resolveInterpolini } from './render/interpolini'
 import { cfgFileName } from '@shared/render/interpolini'
 import { blurRange } from './render/blurClip'
 import { registerMediaProtocol } from './media/protocol'
@@ -80,9 +80,9 @@ function registerIpc(store: ProjectStore): void {
   // ---- Blurred clips: made once with interpolini, kept on disk, used like any other file ----
   const blurJobs = new Map<string, () => void>()
   ipcMain.handle('blur:render', async (e, request: BlurRequest) => {
-    const cli = await findInterpolini(app.getPath('userData'))
+    // The first copy that really starts (a broken one is skipped), so a damaged download never stops the export.
+    const cli = (await resolveInterpolini(app.getPath('userData'))).path
     if (!cli) throw new Error('interpolini is not installed. Use "Download interpolini" in the Motion blur panel first.')
-    await loadVkFix(app.getPath('userData'))
     let cancelled = false
     let kill: (() => void) | null = null
     blurJobs.set(request.jobId, () => {

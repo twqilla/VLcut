@@ -44,22 +44,29 @@ export async function chooseInterpolini(userDir: string, file: string): Promise<
   return interpoliniStatus(userDir)
 }
 
-export async function findInterpolini(userDir: string): Promise<string | null> {
-  const override = process.env.VLCUT_INTERPOLINI
-  if (override && existsSync(override)) return override
-  const chosen = (await readFile(join(userDir, CHOSEN), 'utf8').catch(() => '')).trim()
-  if (chosen && existsSync(chosen)) return chosen
-  for (const dir of [join(userDir, 'interpolini'), join(process.resourcesPath ?? '', 'interpolini')]) {
-    const found = await findIn(dir, 2)
-    if (found) return found
-  }
+/**
+ * Every copy of interpolini that could be used, best first: set by hand, picked in the app, downloaded versions, the one that ships
+ * with the app, a copy from before the app was renamed, the usual install folders and the PATH.
+ */
+export async function interpoliniCandidates(userDir: string): Promise<string[]> {
+  const found: string[] = []
+  const add = (p: string | null | undefined): void => { if (p && existsSync(p) && !found.includes(p)) found.push(p) }
+  add(process.env.VLCUT_INTERPOLINI)
+  add((await readFile(join(userDir, CHOSEN), 'utf8').catch(() => '')).trim())
+  const versions = (await readdir(userDir).catch(() => [])).filter((n) => /^interpolini-\d/.test(n)).sort().reverse()
+  for (const dir of [join(userDir, 'interpolini'), ...versions.map((n) => join(userDir, n)), join(process.resourcesPath ?? '', 'interpolini')]) add(await findIn(dir, 2))
+  // Before the app was renamed it kept its files in a folder with another name, next to this one.
+  for (const old of ['Reelwright', 'Reelsmith']) add(await findIn(join(dirname(userDir), old, 'interpolini'), 2))
   for (const base of [process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs'), process.env.ProgramFiles, process.env['ProgramFiles(x86)']]) {
-    if (!base) continue
-    const found = await findIn(join(base, 'interpolini'), 1)
-    if (found) return found
+    if (base) add(await findIn(join(base, 'interpolini'), 1))
   }
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) if (dir && existsSync(join(dir, exe))) return join(dir, exe)
-  return null
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) if (dir) add(join(dir, exe))
+  return found
+}
+
+/** The first copy found (it may not work: see resolveInterpolini). */
+export async function findInterpolini(userDir: string): Promise<string | null> {
+  return (await interpoliniCandidates(userDir))[0] ?? null
 }
 
 /**
@@ -102,32 +109,52 @@ export async function missingLibraries(exePath: string): Promise<string[]> {
   return NEEDED_LIBRARIES.filter((prefix) => !names.some((n) => n.startsWith(prefix) && n.endsWith('.dll')))
 }
 
-export async function interpoliniStatus(userDir: string): Promise<InterpoliniStatus> {
-  const path = await findInterpolini(userDir)
-  const canAutoInstall = process.platform === 'win32'
-  if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
+interface CopyCheck { ok: boolean; info: string; vkFix: boolean }
+
+/** Does this copy start? Missing libraries are named, and a crash at start is retried without the Vulkan layers. */
+async function checkCopy(path: string): Promise<CopyCheck> {
   // Windows opens a message box and waits when a library is missing, so check the files first and say it plainly.
   if (process.platform === 'win32') {
     const missing = await missingLibraries(path)
-    if (missing.length) return { path, info: `It could not be started: ${missing.map((m) => `${m.replace(/-$/, '')}*.dll`).join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing next to interpolini-cli.exe. Antivirus software often removes such files: check Windows Security → Protection history, restore them, then press “Install this version” to download a complete copy. Motion blur in the export (Frame blending with Vegas weighting) works without it.`, canAutoInstall }
+    if (missing.length) return { ok: false, vkFix: false, info: `It could not be started: ${missing.map((m) => `${m.replace(/-$/, '')}*.dll`).join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing next to interpolini-cli.exe. Antivirus software often removes such files: check Windows Security → Protection history, restore them, then press “Install this version” to download a complete copy. Motion blur in the export (Frame blending with Vegas weighting) works without it.` }
   }
-  let first = await attempt(path, cleanEnv())
-  if (first.ok) {
-    layersOff = false
-    await rm(join(userDir, VK_FLAG), { force: true })
-    return { path, info: first.info, canAutoInstall }
-  }
-  // A crash at start (access violation): try again without the Vulkan layers, and keep doing so if that works.
+  const first = await attempt(path, cleanEnv())
+  if (first.ok) return { ok: true, vkFix: false, info: first.info }
+  // A crash at start (access violation): try again without the Vulkan layers.
   if (first.code !== undefined && first.code !== 1) {
     const second = await attempt(path, { ...cleanEnv(), ...VK_FIX })
-    if (second.ok) {
-      layersOff = true
-      await writeFile(join(userDir, VK_FLAG), 'on', 'utf8')
-      return { path, info: `${second.info} · started with the graphics add-on layers switched off, because they crashed it`, canAutoInstall }
-    }
-    first = { ...first, info: `${first.info} Starting it without the graphics add-on layers did not help either.` }
+    if (second.ok) return { ok: true, vkFix: true, info: `${second.info} · started with the graphics add-on layers switched off, because they crashed it` }
+    return { ok: false, vkFix: false, info: `${first.info} Starting it without the graphics add-on layers did not help either.` }
   }
-  return { path, info: first.info, canAutoInstall }
+  return { ok: false, vkFix: false, info: first.info }
+}
+
+/**
+ * The copy of interpolini to use: the first one that really starts. A broken copy (cut-off download, a file removed by antivirus, a crash)
+ * is skipped in favour of another one, such as the one from before the app was renamed or the one that ships with it.
+ */
+export async function resolveInterpolini(userDir: string): Promise<{ path: string | null; info: string }> {
+  const candidates = await interpoliniCandidates(userDir)
+  if (!candidates.length) return { path: null, info: 'interpolini is not installed.' }
+  let firstProblem = ''
+  for (const [index, path] of candidates.entries()) {
+    const check = await checkCopy(path)
+    if (check.ok) {
+      layersOff = check.vkFix
+      if (check.vkFix) await writeFile(join(userDir, VK_FLAG), 'on', 'utf8')
+      else await rm(join(userDir, VK_FLAG), { force: true })
+      const skipped = index > 0 ? ` · another copy was skipped because it does not start: ${firstProblem.replace(/^It could not be started\.? ?/, '').slice(0, 140)}` : ''
+      return { path, info: `${check.info}${skipped}` }
+    }
+    if (!firstProblem) firstProblem = check.info
+  }
+  return { path: candidates[0], info: firstProblem }
+}
+
+export async function interpoliniStatus(userDir: string): Promise<InterpoliniStatus> {
+  const canAutoInstall = process.platform === 'win32'
+  const found = await resolveInterpolini(userDir)
+  return { path: found.path, info: found.info, canAutoInstall }
 }
 
 /** One-time download of the program from the project's releases (Windows). */
