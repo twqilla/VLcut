@@ -17,6 +17,13 @@ const exe = process.platform === 'win32' ? 'interpolini-cli.exe' : 'interpolini-
 /** The Windows build published by the project (see its README). */
 const WINDOWS_ZIP = 'https://github.com/Z1xus/interpolini/releases/latest/download/interpolini-windows-x86_64.zip'
 
+/** The environment interpolini gets: ours without the variables Electron and Chromium add for themselves, so it starts like it does from a terminal. */
+export function cleanEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {}
+  for (const [k, v] of Object.entries(env)) if (!/^(ELECTRON_|CHROME_|NODE_|GOOGLE_|ORIGINAL_XDG|npm_)/i.test(k) && k !== 'VLCUT_INTERPOLINI') out[k] = v
+  return out
+}
+
 async function findIn(dir: string, depth: number): Promise<string | null> {
   if (existsSync(join(dir, exe))) return join(dir, exe)
   if (depth <= 0) return null
@@ -61,7 +68,7 @@ export async function interpoliniStatus(userDir: string): Promise<InterpoliniSta
   if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
   const info = await new Promise<string>((resolve) =>
     // --help is the documented flag; the program runs from its own folder so it finds its libraries and models.
-    execFile(path, ['--help'], { timeout: 20000, cwd: dirname(path), windowsHide: true }, (err, stdout, stderr) => {
+    execFile(path, ['--help'], { timeout: 20000, cwd: dirname(path), windowsHide: true, env: cleanEnv() }, (err, stdout, stderr) => {
       const text = `${stdout}\n${stderr}`.trim()
       if (!err) return resolve(text.split('\n')[0].trim() || 'ready')
       // Some builds have no --version: if the program ran and printed its usage, it works.
@@ -111,7 +118,7 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
  */
 export function runInterpolini(cli: string, clip: string, settings: InterpoliniSettings, blendFps: number, onProgress: (text: string) => void, onKill: (kill: () => void) => void): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc: ChildProcessWithoutNullStreams = spawn(cli, interpoliniArgs(settings, blendFps, clip), { cwd: dirname(clip) })
+    const proc: ChildProcessWithoutNullStreams = spawn(cli, interpoliniArgs(settings, blendFps, clip), { cwd: dirname(clip), env: cleanEnv(), windowsHide: true })
     onKill(() => proc.kill())
     let output: string | null = null
     let failure = ''
