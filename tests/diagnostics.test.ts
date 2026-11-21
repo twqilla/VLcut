@@ -32,3 +32,9 @@ test('only the most recent errors are kept', () => {
   expect(r).toContain('e99')
   expect(r).not.toContain('e10:')
 })
+
+test('the report says whether interpolini was found and what is missing', () => {
+  const base = { appVersion: '1', versions: {}, platform: 'win32', arch: 'x64', osRelease: '10', memoryGb: 8, cpuCount: 4, gpu: {}, ffmpeg: 'ok', ffprobe: 'ok', uncleanLastRun: false, settings: { theme: 't', mods: [] as string[] }, home: 'C:\\Users\\Someone', user: 'Someone' }
+  expect(buildReport({ ...base, interpolini: 'found (vlcut > interpolini); ready; missing libraries: swresample-' })).toContain('interpolini: found (vlcut > interpolini); ready; missing libraries: swresample-')
+  expect(buildReport(base)).not.toContain('interpolini:')
+})

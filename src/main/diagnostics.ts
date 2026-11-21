@@ -37,6 +37,8 @@ export interface DiagnosticsInput {
   gpu: Record<string, string>
   ffmpeg: string
   ffprobe: string
+  /** interpolini: whether it was found, whether it starts, and which libraries are missing next to it. */
+  interpolini?: string
   uncleanLastRun: boolean
   settings: { theme: string; mods: string[] }
   home: string
@@ -51,6 +53,7 @@ export function buildReport(i: DiagnosticsInput): string {
     `Graphics: ${Object.entries(i.gpu).map(([k, v]) => `${k}=${v}`).join(', ') || 'unknown'}`,
     `FFmpeg: ${i.ffmpeg}`,
     `FFprobe: ${i.ffprobe}`,
+    ...(i.interpolini ? [`interpolini: ${i.interpolini}`] : []),
     `Previous run ended badly: ${i.uncleanLastRun ? 'yes' : 'no'}`,
     `Interface: theme ${i.settings.theme}, styles ${i.settings.mods.join('+') || 'none'}`,
     '',

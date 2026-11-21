@@ -29,7 +29,7 @@ import { makeProxy } from './media/proxy'
 import { exportLossless } from './render/lossless'
 import { losslessPlan } from '@shared/render/lossless'
 import { IMPORT_FILTERS, VIDEO_EXTENSIONS as VIDEO_TYPES } from '@shared/mediaTypes'
-import { chooseInterpolini, findInterpolini, installInterpolini, interpoliniStatus, loadVkFix } from './render/interpolini'
+import { chooseInterpolini, findInterpolini, installInterpolini, interpoliniStatus, loadVkFix, missingLibraries } from './render/interpolini'
 import { cfgFileName } from '@shared/render/interpolini'
 import { blurRange } from './render/blurClip'
 import { registerMediaProtocol } from './media/protocol'
@@ -242,7 +242,11 @@ function registerIpc(store: ProjectStore): void {
   ipcMain.handle('diagnostics:collect', async (_e, settings: { theme?: string; mods?: string[] }) => {
     const tools = await toolStatus()
     const gpu = Object.fromEntries(Object.entries(app.getGPUFeatureStatus()).map(([k, v]) => [k, String(v)]))
+    // interpolini: where it is, whether it starts, and which libraries next to it are missing (names only).
+    const ip = await findInterpolini(app.getPath('userData')).catch(() => null)
+    const interpoliniLine = ip ? `found (${ip.split(/[\\/]/).slice(-3, -1).join(' > ')}); ${(await interpoliniStatus(app.getPath('userData')).catch((e: Error) => ({ info: e.message }))).info.slice(0, 220)}; missing libraries: ${(await missingLibraries(ip)).join(', ') || 'none'}` : 'not installed'
     return buildReport({
+      interpolini: interpoliniLine,
       appVersion: app.getVersion(), versions: process.versions as Record<string, string>, platform: process.platform, arch: process.arch, osRelease: os.release(), memoryGb: os.totalmem() / 1024 ** 3, cpuCount: os.cpus().length, gpu,
       ffmpeg: tools.ffmpeg ? tools.ffmpegInfo : `not working: ${tools.ffmpegInfo}`, ffprobe: tools.ffprobe ? 'ok' : 'not working',
       uncleanLastRun: startupSession.unclean, settings: { theme: String(settings?.theme ?? ''), mods: Array.isArray(settings?.mods) ? settings.mods.map(String) : [] }, home: os.homedir(), user: os.userInfo().username
