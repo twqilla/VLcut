@@ -4,6 +4,7 @@
  * this module only finds the program, downloads it on request, runs it and reads its progress.
  */
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createWriteStream, existsSync } from 'node:fs'
 import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
@@ -14,6 +15,12 @@ import { explainExit } from '@shared/winExit'
 import { type InterpoliniSettings, interpoliniArgs, parseInterpoliniLine } from '@shared/render/interpolini'
 
 const exe = process.platform === 'win32' ? 'interpolini-cli.exe' : 'interpolini-cli'
+/** SHA-256 of the published Windows zips (checked after the download, so a cut-off or damaged file is caught). */
+const KNOWN_SHA256: Record<string, string> = {
+  '0.1.32': '4cb591060deee33c3056c4097cb7255308a3ff2c18ea0ff02740d58c72feead5',
+  '0.1.33': '50387a38a2fa899cd398d21ec45e0db0784a1c9a6db5e630f8353f63dcf59c87',
+  '0.1.34': 'c898f848a34a2e4df237a86a7fd1e75beec2cc72ca8e3e00e8e294b3d0213714'
+}
 /** The Windows build published by the project (see its README). */
 const WINDOWS_ZIP = 'https://github.com/Z1xus/interpolini/releases/latest/download/interpolini-windows-x86_64.zip'
 
@@ -170,16 +177,36 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
   await rm(staging, { recursive: true, force: true })
   await mkdir(staging, { recursive: true })
   const zip = join(staging, 'interpolini.zip')
-  const res = await fetch(url, { redirect: 'follow' })
-  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) for ${url}`)
-  const total = Number(res.headers.get('content-length')) || 0
-  let got = 0
-  const body = Readable.fromWeb(res.body as never)
-  body.on('data', (chunk: Buffer) => {
-    got += chunk.length
-    if (total) onProgress('Downloading interpolini', got / total)
-  })
-  await pipeline(body, createWriteStream(`${zip}.part`))
+  // The download is checked against the size the server announced and, for known versions, a checksum. A connection that drops
+  // halfway would otherwise leave a zip that unpacks only as far as it goes (the first few files) and then looks like a broken program.
+  let lastProblem = ''
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const res = await fetch(url, { redirect: 'follow' })
+    if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) for ${url}`)
+    const total = Number(res.headers.get('content-length')) || 0
+    let got = 0
+    const hash = createHash('sha256')
+    const body = Readable.fromWeb(res.body as never)
+    body.on('data', (chunk: Buffer) => {
+      got += chunk.length
+      hash.update(chunk)
+      if (total) onProgress(attempt > 1 ? 'Downloading interpolini again' : 'Downloading interpolini', got / total)
+    })
+    try {
+      await pipeline(body, createWriteStream(`${zip}.part`))
+    } catch (err) {
+      lastProblem = `the connection dropped (${(err as Error).message})`
+      continue
+    }
+    const expected = version ? KNOWN_SHA256[version] : undefined
+    if (total && got !== total) lastProblem = `only ${(got / 1e6).toFixed(1)} of ${(total / 1e6).toFixed(1)} MB arrived`
+    else if (expected && hash.digest('hex') !== expected) lastProblem = 'the file does not match the published checksum'
+    else { lastProblem = ''; break }
+  }
+  if (lastProblem) {
+    await rm(staging, { recursive: true, force: true })
+    throw new Error(`The download was not complete: ${lastProblem}. Check your internet connection and try again. Nothing was changed.`)
+  }
   await rename(`${zip}.part`, zip)
   onProgress('Unpacking', 1)
   const unpackError = await new Promise<string>((resolve) => execFile('tar', ['-xf', zip, '-C', staging], (err, _o, stderr) => resolve(err ? (stderr || err.message).trim().slice(0, 300) : '')))
@@ -189,7 +216,7 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
   if (unpackError || missing.length) {
     await rm(staging, { recursive: true, force: true })
     const what = missing.length ? ` Missing: ${missing.map((m) => (m === exe ? exe : `${m.replace(/-$/, '')}*.dll`)).join(', ')}.` : ''
-    throw new Error(`The download could not be unpacked completely.${what}${unpackError ? ` Windows said: ${unpackError}` : ''} This usually means antivirus software blocked a file. In Windows Security → Virus & threat protection → Manage settings → Exclusions, add the folder ${dir}, then try again. Your previous copy (if any) was left as it was.`)
+    throw new Error(`The download could not be unpacked completely.${what}${unpackError ? ` Windows said: ${unpackError}` : ''} Antivirus software or a locked file can cause this. In Windows Security → Virus & threat protection → Manage settings → Exclusions, add the folder ${dir}, then try again. Your previous copy (if any) was left as it was.`)
   }
   // Keep the person's own settings file when a copy is replaced.
   const oldExe = await findIn(dir, 2)
