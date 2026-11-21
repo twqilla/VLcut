@@ -493,6 +493,14 @@ export function stripStyle(project: Project): Project {
 
 export function applyStyle(project: Project, style: StyleDef, context: StyleContext = {}): Project {
   let next = stripStyle(project)
+  if (style.gradeOnly) {
+    // Colour styles only lay the grade over the footage.
+    const duration = ops.projectDuration(next)
+    if (!style.look.length || duration <= 0) return next
+    const ensured = ensureTrack(next, 'video', 'Look', 'aboveVideo')
+    const layer: Clip = { ...makeClip({ assetId: null, start: 0, duration }), origin: 'style', effects: style.look.map((e) => ({ ...makeEffect(e.type, e.params), origin: 'style' as const })) }
+    return { ...ensured.project, tracks: ensured.project.tracks.map((t) => (t.id === ensured.track.id ? { ...t, clips: [layer] } : t)) }
+  }
 
   // 1. Pacing: land cuts on the beat when the style asks for it and music is present.
   if (style.pacing.beatSync) next = syncCutsToBeats(next, style.pacing.beatsPerShot).project

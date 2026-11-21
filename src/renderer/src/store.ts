@@ -123,7 +123,7 @@ export const useEditor = create<EditorState>((set, get) => {
     saveState: 'saved',
     zoom: 80,
     snapping: true,
-    snapMarks: { beats: true, snares: true },
+    snapMarks: { beats: false, snares: false },
     autoMute: (() => { try { return localStorage.getItem('auto-mute') === '1' } catch { return false } })(),
 
     async openProject(id) {

@@ -14,7 +14,7 @@ import { pickTrackPoint } from '../motion'
 import { useQuality } from '../engine/quality'
 import { formatOffset, hideReadout, showReadout, useReadout } from '../readout'
 import { Icon, Sr } from './Icon'
-import { setTextEditor, togglePreviewFocus, useUi } from '../ui'
+import { panView, resetView, setPreviewEdit, setTextEditor, togglePreviewFocus, useUi, zoomView } from '../ui'
 import { TextEditor } from './TextEditor'
 import { maskPointsAt, withMaskPoint, withoutKeys } from '@shared/timeline/mask'
 
@@ -50,6 +50,11 @@ export function Preview() {
   const [fit, setFit] = useState<{ w: number; h: number } | null>(null)
   const readout = useReadout()
   const focusOn = useUi((s) => s.previewFocus)
+  const previewEdit = useUi((s) => s.previewEdit)
+  const viewZoom = useUi((s) => s.viewZoom)
+  const viewX = useUi((s) => s.viewX)
+  const viewY = useUi((s) => s.viewY)
+  const viewPan = useRef<{ x: number; y: number } | null>(null)
   const quality = useQuality((s) => s.scale)
   const qualityMode = useQuality((s) => s.mode)
   const qualityNote = useQuality((s) => s.note)
@@ -98,10 +103,11 @@ export function Preview() {
   // Selection box with scale and rotate handles, for the one selected clip.
   const shownIds = groupMode ? visualIds : selectionSize === 1 && visualIds.length === 1 ? visualIds : []
   const shownKey = shownIds.join(',')
-  const handlesOn = Boolean(shownIds.length && movable && !drawingMask && !pickingTrack && !(sourceAsset && !sourceAsset.missing))
+  const outlineOn = Boolean(shownIds.length && movable && !drawingMask && !pickingTrack && !(sourceAsset && !sourceAsset.missing))
+  const handlesOn = outlineOn && previewEdit
   const [box, setBox] = useState<{ cx: number; cy: number; w: number; h: number; rotation: number } | null>(null)
   useEffect(() => {
-    if (!shownKey || !handlesOn) {
+    if (!shownKey || !outlineOn) {
       player.watch([])
       setBox(null)
       return
@@ -116,7 +122,7 @@ export function Preview() {
       window.clearInterval(timer)
       player.watch([])
     }
-  }, [shownKey, handlesOn])
+  }, [shownKey, outlineOn])
 
   /** A group drag: the values every clip had when it began, and the group's centre as fractions of the frame. */
   const startGroup = (): GroupSession => {
@@ -141,7 +147,7 @@ export function Preview() {
     e.preventDefault()
     e.stopPropagation()
     const r = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
-    const [cx, cy] = [r.left + box.cx * k, r.top + box.cy * k]
+    const [cx, cy] = [r.left + box.cx * k * viewZoom, r.top + box.cy * k * viewZoom]
     const d0 = Math.hypot(e.clientX - cx, e.clientY - cy) || 1
     const a0 = Math.atan2(e.clientY - cy, e.clientX - cx)
     const g = startGroup()
@@ -168,7 +174,7 @@ export function Preview() {
     e.preventDefault()
     e.stopPropagation()
     const r = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
-    const [cx, cy] = [r.left + box.cx * k, r.top + box.cy * k]
+    const [cx, cy] = [r.left + box.cx * k * viewZoom, r.top + box.cy * k * viewZoom]
     const d0 = Math.hypot(e.clientX - cx, e.clientY - cy) || 1
     const s0 = current('scale')
     const key = `handle-scale-${Date.now()}`
@@ -188,7 +194,7 @@ export function Preview() {
     e.preventDefault()
     e.stopPropagation()
     const r = e.currentTarget.ownerSVGElement!.getBoundingClientRect()
-    const [cx, cy] = [r.left + box.cx * k, r.top + box.cy * k]
+    const [cx, cy] = [r.left + box.cx * k * viewZoom, r.top + box.cy * k * viewZoom]
     const a0 = Math.atan2(e.clientY - cy, e.clientX - cx)
     const r0 = current('rotation')
     const key = `handle-rotate-${Date.now()}`
@@ -226,6 +232,7 @@ export function Preview() {
     else player.watch(shownIds)
   }
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.button === 1) { e.preventDefault(); e.currentTarget.setPointerCapture(e.pointerId); viewPan.current = { x: e.clientX, y: e.clientY }; return }
     if (e.button === 0 && !pickingTrack && !drawingMask && !(sourceAsset && !sourceAsset.missing)) void pickAt(e.currentTarget, e.clientX, e.clientY, e.shiftKey || e.ctrlKey || e.metaKey)
     if (!movable || e.button !== 0) return
     if (pickingTrack) {
@@ -245,11 +252,15 @@ export function Preview() {
       useEditor.getState().updateSelected('Add mask point', (c) => (c.mask ? { mask: withoutKeys({ ...c.mask, points: [...(c.mask.points ?? []), [px, py]] }) } : {}))
       return
     }
+    // Position editing is off until the Edit button is on: a drag then moves the view (when zoomed in), never a clip.
+    if (!previewEdit) { if (viewZoom !== 1) { e.currentTarget.setPointerCapture(e.pointerId); viewPan.current = { x: e.clientX, y: e.clientY } } return }
     e.currentTarget.setPointerCapture(e.pointerId)
     if (groupMode) { groupDrag.current = { ...startGroup(), x: e.clientX, y: e.clientY }; return }
     drag.current = { x: e.clientX, y: e.clientY, ox: current('x'), oy: current('y'), os: current('scale'), or: current('rotation'), key: `preview-${Date.now()}` }
   }
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const vp = viewPan.current
+    if (vp && e.currentTarget.hasPointerCapture(e.pointerId)) { panView(e.clientX - vp.x, e.clientY - vp.y); viewPan.current = { x: e.clientX, y: e.clientY }; return }
     const gd = groupDrag.current
     if (gd && e.currentTarget.hasPointerCapture(e.pointerId)) {
       const rect = e.currentTarget.getBoundingClientRect()
@@ -290,8 +301,13 @@ export function Preview() {
     showReadout(e.clientX, e.clientY, [...off.lines, 'from the centre'], { guides: true, onCentreX: off.onCentreX, onCentreY: off.onCentreY })
     nudge({ x, y }, d.key)
   }
-  const onWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-    if (!movable) return
+  const onWheel = (e: React.WheelEvent<HTMLElement>) => {
+    // The wheel moves the view (zoom towards the pointer). In edit mode, Ctrl + wheel resizes the selected clip instead.
+    if (!(previewEdit && movable && (e.ctrlKey || e.metaKey))) {
+      const r = stageRef.current!.getBoundingClientRect()
+      zoomView(Math.exp(-Math.max(-300, Math.min(300, e.deltaY)) * 0.0015), e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2))
+      return
+    }
     if (groupMode) { const g = startGroup(); return applyGroup(g, { factor: e.deltaY < 0 ? 1.04 : 1 / 1.04 }) }
     nudge({ scale: Math.max(0.05, Math.min(6, current('scale') * (e.deltaY < 0 ? 1.04 : 1 / 1.04))) }, 'preview-scale')
   }
@@ -326,7 +342,7 @@ export function Preview() {
   return (
     <div className="preview-wrap">
       <TextEditor />
-      <div className="preview" ref={stageRef}>
+      <div className="preview" ref={stageRef} onWheel={onWheel}>
         {sourceAsset && !sourceAsset.missing ? (
           <div className="source-view">
             <span className="badge">Source: {sourceAsset.name}</span>
@@ -335,19 +351,21 @@ export function Preview() {
             {sourceAsset.kind === 'audio' && <audio key={sourceAsset.id} src={mediaUrl(sourceAsset.path)} controls />}
           </div>
         ) : null}
-        {handlesOn && box && fit && !editingMask && (() => {
+        <div className="view-layer" style={{ transform: `translate(${viewX}px, ${viewY}px) scale(${viewZoom})` }}>
+        {outlineOn && box && fit && !editingMask && (() => {
           const k = fit.w / width
           const [cx, cy, w, h] = [box.cx * k, box.cy * k, box.w * k, box.h * k]
+          const z = viewZoom
           const corners: [string, number, number][] = [['top-left', -1, -1], ['top-right', 1, -1], ['bottom-left', -1, 1], ['bottom-right', 1, 1]]
           return (
-            <svg className="sel-handles" width={fit.w} height={fit.h} style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', zIndex: 3, overflow: 'visible' }} aria-label={groupMode ? 'Group selection handles' : 'Selection handles'}>
+            <svg className="sel-handles" width={fit.w} height={fit.h} style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none', zIndex: 3, overflow: 'visible' }} aria-label={groupMode ? (handlesOn ? 'Group selection handles' : 'Group selection outline') : (handlesOn ? 'Selection handles' : 'Selection outline')}>
               <g transform={`rotate(${box.rotation} ${cx} ${cy})`}>
-                <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} fill="none" stroke="var(--accent-hi)" strokeWidth={1.5} />
-                <line x1={cx} y1={cy - h / 2} x2={cx} y2={cy - h / 2 - 22} stroke="var(--accent-hi)" strokeWidth={1.5} />
-                {corners.map(([name, dx, dy]) => (
-                  <rect key={name} x={cx + (dx * w) / 2 - 5} y={cy + (dy * h) / 2 - 5} width={10} height={10} fill="#fff" stroke="var(--accent)" strokeWidth={2} aria-label={`Scale handle ${name}`} style={{ pointerEvents: 'all', cursor: dx * dy > 0 ? 'nwse-resize' : 'nesw-resize' }} onPointerDown={(e) => (groupMode ? dragGroupHandle(e, k, 'scale') : dragScale(e, k))} />
+                <rect x={cx - w / 2} y={cy - h / 2} width={w} height={h} fill="none" stroke="var(--accent-hi)" strokeWidth={1.5 / z} strokeDasharray={handlesOn ? undefined : `${6 / z} ${4 / z}`} />
+                {handlesOn && <line x1={cx} y1={cy - h / 2} x2={cx} y2={cy - h / 2 - 22 / z} stroke="var(--accent-hi)" strokeWidth={1.5 / z} />}
+                {handlesOn && corners.map(([name, dx, dy]) => (
+                  <rect key={name} x={cx + (dx * w) / 2 - 5 / z} y={cy + (dy * h) / 2 - 5 / z} width={10 / z} height={10 / z} fill="#fff" stroke="var(--accent)" strokeWidth={2 / z} aria-label={`Scale handle ${name}`} style={{ pointerEvents: 'all', cursor: dx * dy > 0 ? 'nwse-resize' : 'nesw-resize' }} onPointerDown={(e) => (groupMode ? dragGroupHandle(e, k, 'scale') : dragScale(e, k))} />
                 ))}
-                <circle cx={cx} cy={cy - h / 2 - 22} r={6} fill="var(--accent)" stroke="#fff" strokeWidth={2} aria-label="Rotate handle" style={{ pointerEvents: 'all', cursor: 'grab' }} onPointerDown={(e) => (groupMode ? dragGroupHandle(e, k, 'rotate') : dragRotate(e, k))} />
+                {handlesOn && <circle cx={cx} cy={cy - h / 2 - 22 / z} r={6 / z} fill="var(--accent)" stroke="#fff" strokeWidth={2 / z} aria-label="Rotate handle" style={{ pointerEvents: 'all', cursor: 'grab' }} onPointerDown={(e) => (groupMode ? dragGroupHandle(e, k, 'rotate') : dragRotate(e, k))} />}
               </g>
             </svg>
           )
@@ -403,12 +421,13 @@ export function Preview() {
             <line x1={0} y1={fit.h / 2} x2={fit.w} y2={fit.h / 2} stroke={readout.onCentreY ? 'var(--accent-hi)' : 'rgba(255,255,255,0.25)'} strokeWidth={readout.onCentreY ? 2 : 1} strokeDasharray={readout.onCentreY ? undefined : '4 4'} />
           </svg>
         )}
+        <canvas ref={canvasRef} width={width} height={height} style={{ display: sourceAsset && !sourceAsset.missing ? 'none' : undefined, width: fit?.w, height: fit?.h }} aria-label="Program preview" className={`${drawingMask || pickingTrack ? 'drawing' : movable && previewEdit ? 'movable' : viewZoom !== 1 ? 'pannable' : ''} ${settings.pixelScaling ? 'pixelated' : ''}`} title={drawingMask ? 'Click to add corners to the mask' : movable && previewEdit ? 'Drag to move the selected clip. Shift-drag or scroll to resize, Ctrl-drag to rotate. Hold Alt to stop snapping to the centre.' : undefined} onPointerDown={onPointerDown} onDoubleClick={() => { const s = useEditor.getState(); const c = s.selection.length === 1 ? findClip(s.project!, s.selection[0])?.clip : undefined; if (c?.text) setTextEditor(true) }} onPointerMove={onPointerMove} onPointerUp={() => { drag.current = null; groupDrag.current = null; viewPan.current = null; hideReadout() }} />
+        </div>
         {readout.visible && (
           <div className="drag-readout" role="status" style={{ left: readout.x + 16, top: readout.y + 16 }}>
             {readout.lines.map((l, i) => <div key={i} className={i === readout.lines.length - 1 && l === 'from the centre' ? 'dim' : ''}>{l}</div>)}
           </div>
         )}
-        <canvas ref={canvasRef} width={width} height={height} style={{ display: sourceAsset && !sourceAsset.missing ? 'none' : undefined, width: fit?.w, height: fit?.h }} aria-label="Program preview" className={`${drawingMask || pickingTrack ? 'drawing' : movable ? 'movable' : ''} ${settings.pixelScaling ? 'pixelated' : ''}`} title={drawingMask ? 'Click to add corners to the mask' : movable ? 'Drag to move the selected clip. Shift-drag or scroll to resize, Ctrl-drag to rotate. Hold Alt to stop snapping to the centre.' : undefined} onPointerDown={onPointerDown} onDoubleClick={() => { const s = useEditor.getState(); const c = s.selection.length === 1 ? findClip(s.project!, s.selection[0])?.clip : undefined; if (c?.text) setTextEditor(true) }} onPointerMove={onPointerMove} onPointerUp={() => { drag.current = null; groupDrag.current = null; hideReadout() }} onWheel={onWheel} />
       </div>
       <div className="transport">
         <Timecode />
@@ -420,6 +439,12 @@ export function Preview() {
           </button>
           <button onClick={() => player.step(1)} title="Next frame (→)" aria-label="Next frame"><Icon name="stepForward" /></button>
           <button onClick={() => player.seek(Infinity)} title="Go to end (End)" aria-label="Go to end"><Icon name="skipEnd" /></button>
+        </div>
+        <div className="view-tools">
+          <button className="icon-btn" onClick={() => setPreviewEdit(!previewEdit)} aria-pressed={previewEdit} title="Edit position: drag, scale and rotate the selected clip in the preview (E). Off by default so the picture never moves by accident." aria-label="Edit position"><Icon name="move" /></button>
+          <button className="icon-btn" onClick={() => zoomView(1 / 1.25)} title="Zoom the view out (mouse wheel)" aria-label="Zoom view out"><Icon name="zoomOut" /></button>
+          <button className="zoom-readout" onClick={resetView} title="Fit the whole picture (click). Drag with the middle button, or drag when zoomed in, to move the view." aria-label="Fit view">{Math.round(viewZoom * 100)}%</button>
+          <button className="icon-btn" onClick={() => zoomView(1.25)} title="Zoom the view in (mouse wheel)" aria-label="Zoom view in"><Icon name="zoomIn" /></button>
         </div>
         <button className="icon-btn focus-toggle" onClick={togglePreviewFocus} aria-pressed={focusOn} title="Make the preview larger (F)" aria-label="Focus preview"><Icon name={focusOn ? 'shrink' : 'expand'} /></button>
         <label className="quality">

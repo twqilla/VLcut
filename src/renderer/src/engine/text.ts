@@ -193,7 +193,11 @@ export function drawText(ctx: Ctx, clip: Clip, localT: number, W: number, H: num
     }
   }
 
-  const typedChars = anim === 'typewriter' ? Math.floor(localT * 26) : Infinity
+  const totalChars = tokens.length ? tokens[tokens.length - 1].charsBefore + tokens[tokens.length - 1].text.length : 0
+  const typeRate = text.typeSeconds && text.typeSeconds > 0 ? totalChars / text.typeSeconds : 26
+  const typedChars = anim === 'typewriter' ? Math.floor(localT * typeRate) : Infinity
+  // The cursor blinks twice a second once typing has paused or finished, and stays solid while letters appear.
+  const cursorOn = anim === 'typewriter' && text.typeCursor !== false && (typedChars < totalChars || Math.floor(localT * 2) % 2 === 0)
   const perLetter = PER_LETTER.has(anim)
 
   // 5. Tokens.
@@ -402,6 +406,15 @@ export function drawText(ctx: Ctx, clip: Clip, localT: number, W: number, H: num
       drawDistorted(ctx, tok.font, spacing, tw, px, text, localT, (c) => paint(c, shown, -tw / 2, -tw / 2))
     } else {
       paint(ctx, shown, -tw / 2, -tw / 2)
+    }
+    if (cursorOn && shown.length > 0 && typedChars - tok.charsBefore <= tok.text.length) {
+      // The cursor sits after the last letter typed so far (a block, like a terminal).
+      ctx.font = tok.font
+      ctx.letterSpacing = `${spacing}px`
+      const cw = Math.max(px * 0.09, px * 0.4)
+      ctx.globalAlpha = alpha
+      ctx.fillStyle = color
+      ctx.fillRect(-tw / 2 + ctx.measureText(shown).width + px * 0.05, -px * 0.42, cw * 0.55, px * 0.84)
     }
     ctx.restore()
   }

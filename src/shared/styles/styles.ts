@@ -39,6 +39,8 @@ export interface StyleDef {
   /** Vertical caption position, fraction of the frame from the centre. */
   captionY: number
   audio: { fadeIn: number; fadeOut: number; duckMusic: boolean }
+  /** A colour style: only the grade is applied (no camera movement, shakes, pulses, transitions, sounds, pacing or type changes). */
+  gradeOnly?: boolean
 }
 
 const fx = (type: string, params: Record<string, number>): StyleEffect => ({ type, params })
@@ -167,3 +169,35 @@ export function withIntensity(style: StyleDef, intensity: number): StyleDef {
     list.map((e) => ({ type: e.type, params: Object.fromEntries(Object.entries(e.params).map(([k, v]) => [k, ['size', 'radius', 'speed', 'bpm', 'ratio', 'shadowHue', 'highlightHue', 'angle', 'frequency', 'density'].includes(k) ? v : v * intensity])) }))
   return { ...style, look: scale(style.look), clipEffects: scale(style.clipEffects) }
 }
+
+/** What each colour style looks like, in words about colour only. */
+const COLOUR_WORDS: Record<string, [string, string]> = {
+  cinematic: ['Teal and amber', 'Teal shadows, amber highlights, lifted blacks and a soft vignette.'],
+  editorial: ['Clean neutral', 'Neutral colour with gentle contrast and a touch of fade.'],
+  hype: ['Punchy', 'Strong contrast and saturation with a warm cast.'],
+  analog: ['Warm film', 'Faded warm film stock with grain and a soft glow.'],
+  luxury: ['Deep and polished', 'Deep blacks, soft highlights and a champagne cast.'],
+  glitch: ['Cold digital', 'Cold, slightly desaturated digital grade with a light grain.'],
+  'studio-warm': ['Olive and cream', 'Warm olive-brown grade with creamy highlights.'],
+  'neon-product': ['Neon black', 'Crushed blacks with a green-tinted glow.'],
+  kinetic: ['Hot orange', 'Hot orange grade with strong contrast.'],
+  explainer: ['Bright and clean', 'Bright, clean colour with a little extra saturation.']
+}
+
+/** The same grades as colour-only styles: nothing that moves, shakes, pulses or cuts. */
+export function gradeOnly(style: StyleDef): StyleDef {
+  const words = COLOUR_WORDS[style.id]
+  return {
+    ...style,
+    tagline: words?.[0] ?? style.tagline,
+    description: words?.[1] ?? 'A colour grade.',
+    look: style.look.filter((e) => !['glitch', 'flicker', 'rgbSplit', 'shake', 'zoomPulse', 'slowZoom'].includes(e.type)),
+    clipEffects: [], alternate: undefined,
+    transitions: { types: [], duration: 0 }, transitionSfx: '', sfxVolume: 0,
+    pacing: { shotLength: style.pacing.shotLength, beatSync: false, beatsPerShot: style.pacing.beatsPerShot },
+    title: {}, caption: {}, audio: { fadeIn: 0, fadeOut: 0, duckMusic: false },
+    gradeOnly: true
+  }
+}
+
+export const COLOUR_STYLES: StyleDef[] = BUILTIN_STYLES.map(gradeOnly)

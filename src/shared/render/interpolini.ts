@@ -11,6 +11,10 @@ export const WEIGHTINGS = ['equal', 'gaussian', 'gaussian_sym', 'pyramid', 'asce
 export type Weighting = (typeof WEIGHTINGS)[number]
 
 export interface InterpoliniSettings {
+  /** Make extra frames first (SVP or RIFE). Off means the clip's own frames are only blended down. */
+  interpolate: boolean
+  /** Frame rate to blend down to. Empty means the same as the export's frame rate. */
+  blendFps?: number
   /** 'svp' (default) or 'rife' (AI). */
   engine: 'svp' | 'rife'
   /** Interpolate up to this many frames per second ("960"), or a multiple of the clip's rate ("x16"). */
@@ -34,7 +38,7 @@ export interface InterpoliniSettings {
 
 /** interpolini's own defaults (crates/core/src/config.rs). */
 export const DEFAULT_INTERPOLINI: InterpoliniSettings = {
-  engine: 'svp', fps: '960', speed: 'faster', tuning: 'film', algorithm: '13', half: true, dedup: true, intensity: 1, gamma: 1, weighting: 'equal', custom: [1, 2, 5]
+  interpolate: true, engine: 'svp', fps: '960', speed: 'faster', tuning: 'film', algorithm: '13', half: true, dedup: true, intensity: 1, gamma: 1, weighting: 'equal', custom: [1, 2, 5]
 }
 
 export const WEIGHTING_LABELS: Record<Weighting, string> = {
@@ -104,7 +108,10 @@ export function blendWeights(sourceFps: number, blendFps: number, intensity: num
 export function normalizeInterpolini(input: Partial<InterpoliniSettings> | undefined): InterpoliniSettings {
   const i: Partial<InterpoliniSettings> = input ?? {}
   const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? (value as T) : fallback)
+  const blendFps = Number(i.blendFps)
   return {
+    interpolate: i.interpolate !== false,
+    ...(Number.isFinite(blendFps) && blendFps >= 1 && blendFps <= 1000 ? { blendFps: Math.round(blendFps) } : {}),
     engine: pick(i.engine, ['svp', 'rife'], DEFAULT_INTERPOLINI.engine),
     fps: /^(x\d{1,4}|\d{1,4}x|\d{2,5})$/i.test(String(i.fps ?? '')) ? String(i.fps).toLowerCase() : DEFAULT_INTERPOLINI.fps,
     speed: pick(i.speed, ['medium', 'fast', 'faster', 'fastest'], DEFAULT_INTERPOLINI.speed),
@@ -128,7 +135,7 @@ export function interpoliniSettingArgs(s: InterpoliniSettings, blendFps: number)
   const set = (name: string, value: string | number | boolean): string[] => ['-s', `${name}=${typeof value === 'boolean' ? (value ? 'yes' : 'no') : value}`]
   return [
     ...set('dedup.enabled', s.dedup),
-    ...set('interpolation.enabled', true),
+    ...set('interpolation.enabled', s.interpolate),
     ...set('interpolation.engine', s.engine),
     ...set('interpolation.fps', s.fps),
     ...set('interpolation.speed', s.speed),
@@ -136,7 +143,7 @@ export function interpoliniSettingArgs(s: InterpoliniSettings, blendFps: number)
     ...set('interpolation.algorithm', s.algorithm),
     ...set('interpolation.half size', s.half),
     ...set('blending.enabled', true),
-    ...set('blending.fps', Math.max(1, Math.min(1000, Math.round(blendFps)))),
+    ...set('blending.fps', Math.max(1, Math.min(1000, Math.round(s.blendFps ?? blendFps)))),
     ...set('blending.intensity', s.intensity),
     ...set('blending.gamma', s.gamma),
     ...set('blending.weighting', s.weighting === 'custom' ? listText(s.custom) : s.weighting),
@@ -176,11 +183,60 @@ export function parseInterpoliniLine(line: string): InterpoliniEvent | null {
   }
 }
 
+/** The frame rate of the frames that get blended: the interpolation rate, or the clip's own rate when interpolation is off. */
+export const sourceRate = (s: InterpoliniSettings, clipFps: number): number => (s.interpolate ? resolveRate(s.fps, clipFps) : Math.round(clipFps))
+
 /** One sentence for the export dialog about what a setting combination will do to each frame. */
 export function describeBlend(s: InterpoliniSettings, clipFps: number, blendFps: number): string {
-  const high = resolveRate(s.fps, clipFps)
-  const weights = blendWeights(high, blendFps, s.intensity, s.weighting, s.custom)
+  const high = sourceRate(s, clipFps)
+  const target = s.blendFps ?? blendFps
+  const weights = blendWeights(high, target, s.intensity, s.weighting, s.custom)
+  const what = s.interpolate ? `${high} fps interpolated frames` : `${high} fps frames of the clip`
   return weights.length === 1
-    ? `Interpolated to ${high} fps but blended into ${blendFps} fps with a window of 1 frame, so there is no visible blur. Raise the interpolation rate or the intensity.`
-    : `Each ${blendFps} fps frame blends ${weights.length} of the ${high} fps interpolated frames.`
+    ? `${s.interpolate ? `Interpolated to ${high} fps` : `The clip is ${high} fps`} but blended into ${target} fps with a window of 1 frame, so there is no visible blur. ${s.interpolate ? 'Raise the interpolation rate or the intensity.' : 'Use footage with a higher frame rate than the target, or turn interpolation on.'}`
+    : `Each ${target} fps frame blends ${weights.length} of the ${what}.`
+}
+
+// ---------- config files (.cfg) ----------
+
+/** A safe file name (without extension) for a saved configuration. */
+export const cfgFileName = (name: string): string => name.replace(/[^\w .()-]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 40) || 'config'
+
+
+/** The settings as a .cfg text file, in sections like interpolini's own configuration, so it can be read and edited by hand. */
+export function interpoliniToCfg(s: InterpoliniSettings, title = 'VLcut interpolini settings'): string {
+  const v = (x: string | number | boolean): string => (typeof x === 'boolean' ? (x ? 'yes' : 'no') : String(x))
+  const lines = [
+    `# ${title}`,
+    '# Edit the values, save the file, then use Reload in VLcut. "fps" under [blending] is optional: leave it out to use the export frame rate.',
+    '', '[dedup]', `enabled = ${v(s.dedup)}`,
+    '', '[interpolation]', `enabled = ${v(s.interpolate)}`, `engine = ${s.engine}`, `fps = ${s.fps}`, `speed = ${s.speed}`, `tuning = ${s.tuning}`, `algorithm = ${s.algorithm}`, `half size = ${v(s.half)}`,
+    '', '[blending]', ...(s.blendFps ? [`fps = ${s.blendFps}`] : []), `intensity = ${s.intensity}`, `gamma = ${s.gamma}`, `weighting = ${s.weighting === 'custom' ? listText(s.custom) : s.weighting}`
+  ]
+  return lines.join('\n') + '\n'
+}
+
+/** Reads a .cfg text back into settings. Unknown lines are ignored; every value is checked, so a typo cannot break a run. */
+export function cfgToInterpolini(text: string): InterpoliniSettings {
+  const got: Record<string, string> = {}
+  let section = ''
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/\s+#.*$/, '').trim()
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+    const head = /^\[([^\]]+)\]$/.exec(line)
+    if (head) { section = head[1].trim().toLowerCase(); continue }
+    const eq = line.indexOf('=')
+    if (eq > 0) got[`${section}.${line.slice(0, eq).trim().toLowerCase()}`] = line.slice(eq + 1).trim().replace(/^"(.*)"$/, '$1')
+  }
+  const yes = (k: string, d: boolean): boolean => (k in got ? /^(yes|true|on|1)$/i.test(got[k]) : d)
+  const weightingText = got['blending.weighting'] ?? ''
+  const custom = /^\[.*\]$/.test(weightingText) ? weightingText.replace(/[[\]]/g, '').split(',').map((x) => Number(x.trim())) : undefined
+  return normalizeInterpolini({
+    interpolate: yes('interpolation.enabled', true), dedup: yes('dedup.enabled', true), half: yes('interpolation.half size', true),
+    engine: got['interpolation.engine'] as InterpoliniSettings['engine'], fps: got['interpolation.fps'], speed: got['interpolation.speed'] as InterpoliniSettings['speed'],
+    tuning: got['interpolation.tuning'] as InterpoliniSettings['tuning'], algorithm: got['interpolation.algorithm'] as InterpoliniSettings['algorithm'],
+    blendFps: got['blending.fps'] ? Number(got['blending.fps']) : undefined, intensity: got['blending.intensity'] !== undefined ? Number(got['blending.intensity']) : undefined,
+    gamma: got['blending.gamma'] !== undefined ? Number(got['blending.gamma']) : undefined,
+    weighting: (custom ? 'custom' : weightingText) as InterpoliniSettings['weighting'], ...(custom ? { custom } : {})
+  })
 }

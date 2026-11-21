@@ -7,13 +7,14 @@ import { spectrum } from './audio/spectrum'
 import { syncFiles } from './audio/sync'
 import { app, BrowserWindow, dialog, ipcMain, protocol, screen, shell } from 'electron'
 import { existsSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { basename, dirname, extname, join } from 'node:path'
 import type { MediaAsset, Project } from '@shared/types'
 import { ProjectStore } from './projects/projectStore'
 import { probeMedia } from './media/probe'
 import { toolStatus } from './media/tools'
 import { thumbnail, waveform } from './media/waveform'
-import { cancelExport, failRender, finishRender, pushFrame, renderJob, startExport } from './render/exporter'
+import { cancelExport, failRender, finishRender, pushFrame, renderJob, startExport, probeEncoders } from './render/exporter'
 import type { BlurRequest, ExportSettings } from '@shared/types'
 import { analyzeAsset } from './analysis/analyze'
 import { ensureSfx } from './audio/sfx'
@@ -29,6 +30,7 @@ import { exportLossless } from './render/lossless'
 import { losslessPlan } from '@shared/render/lossless'
 import { IMPORT_FILTERS, VIDEO_EXTENSIONS as VIDEO_TYPES } from '@shared/mediaTypes'
 import { findInterpolini, installInterpolini, interpoliniStatus } from './render/interpolini'
+import { cfgFileName } from '@shared/render/interpolini'
 import { blurRange } from './render/blurClip'
 import { registerMediaProtocol } from './media/protocol'
 
@@ -96,6 +98,20 @@ function registerIpc(store: ProjectStore): void {
     }
   })
   ipcMain.handle('blur:cancel', (_e, jobId: string) => blurJobs.get(jobId)?.())
+  // ---- Saved interpolini configurations: plain .cfg files in the app's folder, editable in Notepad ----
+  const cfgDir = join(userData, 'interpolini-configs')
+  const cfgPath = (name: string): string => join(cfgDir, `${cfgFileName(String(name))}.cfg`)
+  ipcMain.handle('cfg:list', async () => (await readdir(cfgDir).catch(() => [] as string[])).filter((f) => f.endsWith('.cfg')).map((f) => f.slice(0, -4)).sort((a, b) => a.localeCompare(b)))
+  ipcMain.handle('cfg:save', async (_e, name: string, text: string) => { await mkdir(cfgDir, { recursive: true }); await writeFile(cfgPath(name), String(text).slice(0, 20000), 'utf8'); return cfgFileName(String(name)) })
+  ipcMain.handle('cfg:read', (_e, name: string) => readFile(cfgPath(name), 'utf8'))
+  ipcMain.handle('cfg:delete', (_e, name: string) => rm(cfgPath(name), { force: true }))
+  ipcMain.handle('cfg:edit', async (_e, name: string) => {
+    const file = cfgPath(name)
+    if (!existsSync(file)) throw new Error('Save the configuration first.')
+    // Notepad on Windows; the system's text editor elsewhere.
+    if (process.platform === 'win32') spawn('notepad.exe', [file], { detached: true, stdio: 'ignore' }).unref()
+    else await shell.openPath(file)
+  })
   ipcMain.handle('interpolini:status', () => interpoliniStatus(app.getPath('userData')))
   ipcMain.handle('interpolini:install', (e) => installInterpolini(app.getPath('userData'), (label, fraction) => e.sender.send('interpolini:progress', { label, fraction })))
   ipcMain.handle('speech:status', () => speechStatus(speechDir))
@@ -355,6 +371,9 @@ function registerIpc(store: ProjectStore): void {
     })
     return result.canceled || !result.filePath ? null : result.filePath
   })
+  // Which video encoders really work here (NVENC needs an NVIDIA card and driver): each is tried on a tiny test picture.
+  let encoderProbe: Promise<Record<string, { ok: boolean; reason: string }>> | null = null
+  ipcMain.handle('export:encoders', () => (encoderProbe ??= probeEncoders()))
   ipcMain.handle('export:start', async (e, project: Project, settings: ExportSettings) => startExport(e.sender, project, settings, PRELOAD, loadRenderer, await findInterpolini(join(app.getPath('userData')))))
   ipcMain.handle('export:lossless', async (_e, project: Project, outputPath: string) => {
     const plan = losslessPlan(project)

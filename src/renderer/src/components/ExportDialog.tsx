@@ -1,12 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ExportProgress, ExportSettings } from '@shared/types'
 import { projectDuration } from '@shared/timeline/ops'
+import { sliceProject } from '@shared/timeline/range'
+import { useUi } from '../ui'
 import { losslessPlan } from '@shared/render/lossless'
 import { useEditor } from '../store'
 import { formatDuration } from '../format'
 import { Num, Row } from './fields'
 import { InterpoliniPanel } from './InterpoliniPanel'
-import { DEFAULT_INTERPOLINI } from '@shared/render/interpolini'
+import { loadBlurSettings } from '../blur'
+import { vegasWindow } from '@shared/render/vegasBlend'
 import { EXPORT_PRESETS, applyPreset, presetFileName, shapeMismatch } from '@shared/render/presets'
 
 const HEIGHTS = [720, 1080, 1440, 2160]
@@ -18,7 +21,14 @@ const QUALITY = [
 ]
 
 export function ExportDialog({ onClose }: { onClose(): void }) {
-  const project = useEditor((s) => s.project!)
+  const wholeProject = useEditor((s) => s.project!)
+  const rangeIn = useUi((u) => u.rangeIn)
+  const rangeOut = useUi((u) => u.rangeOut)
+  const hasRange = rangeIn !== null && rangeOut !== null && rangeOut > rangeIn
+  const [useRange, setUseRange] = useState(true)
+  /** What is exported: the whole timeline, or only the part between the in and out marks. */
+  const regionOnly = hasRange && useRange
+  const project = useMemo(() => (regionOnly ? sliceProject(wholeProject, rangeIn!, rangeOut!) : wholeProject), [regionOnly, wholeProject, rangeIn, rangeOut])
   const duration = projectDuration(project)
   const aspect = project.settings.width / project.settings.height
   // "1080p" means the short side is 1080, whatever the orientation.
@@ -32,10 +42,15 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
     crf: 18,
     audioBitrateKbps: 192,
     normalizeAudio: false,
-    motionBlur: { mode: 'off', amount: 0.75, samples: 16, weighting: 'gaussian', interpolini: DEFAULT_INTERPOLINI },
+    motionBlur: { mode: 'off', amount: 0.75, samples: 16, weighting: 'gaussian', interpolini: loadBlurSettings() },
     pixelScaling: Boolean(project.settings.pixelScaling)
   })
   const [useBitrate, setUseBitrate] = useState(false)
+  const [encoders, setEncoders] = useState<Record<string, { ok: boolean; reason: string }> | null>(null)
+  useEffect(() => void window.api.exporter.encoders().then(setEncoders).catch(() => undefined), [])
+  /** The fastest frame rate among the footage in the project (what a Vegas-style resample blends down from). */
+  const footageFps = Math.max(1, ...project.media.filter((m) => m.kind === 'video').map((m) => m.fps ?? project.settings.fps))
+  const vegasNote = (src: number, out: number, intensity: number): string => { const w = vegasWindow(src, out, intensity); return w.weights.length <= 1 ? `The footage is ${Math.round(src)} fps and the export ${out} fps, so each exported frame is one footage frame and nothing is blended. Use footage with a higher frame rate (for example 120 or 240 fps) for a blur.` : `Each ${out} fps frame blends ${w.weights.length} frames of the ${Math.round(src)} fps footage (weights ${w.weights.map((x) => Math.round(x / Math.min(...w.weights))).join(' : ')}).` }
   const [progress, setProgress] = useState<ExportProgress | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const plan = losslessPlan(project)
@@ -72,7 +87,7 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
     if (useLossless) {
       setFast({ state: 'running', text: 'Copying without re-encoding…' })
       try {
-        const seconds = await window.api.exporter.lossless(useEditor.getState().project!, outputPath)
+        const seconds = await window.api.exporter.lossless(project, outputPath)
         setFast({ state: 'done', text: `Export finished in ${seconds.toFixed(1)} s, at the original quality.`, path: outputPath })
       } catch (err) {
         setFast({ state: 'error', text: (err as Error).message.replace(/^Error invoking remote method '[^']+': Error: /, '') })
@@ -81,7 +96,7 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
     }
     const final = { ...settings, outputPath, videoBitrateKbps: useBitrate ? settings.videoBitrateKbps ?? 12000 : undefined }
     try {
-      setJobId(await window.api.exporter.start(useEditor.getState().project!, final))
+      setJobId(await window.api.exporter.start(project, final))
     } catch (err) {
       setProgress({ jobId: '', state: 'error', frame: 0, totalFrames: 0, elapsedMs: 0, message: (err as Error).message.replace(/^Error invoking remote method '[^']+': Error: /, ''), outputPath })
     }
@@ -109,7 +124,7 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
       mark('running')
       try {
         const out = presetFileName(base, p)
-        const id = await window.api.exporter.start(useEditor.getState().project!, { ...applyPreset(p, project.settings, settings), outputPath: out })
+        const id = await window.api.exporter.start(project, { ...applyPreset(p, project.settings, settings), outputPath: out })
         setJobId(id)
         const final = await waitForJob(id)
         mark(final.state === 'done' ? 'done' : 'failed', final.state === 'done' ? out : final.message ?? final.state)
@@ -145,6 +160,11 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
               </p>
             </div>
             <fieldset disabled={running}>
+              {hasRange && (
+                <Row label="Region">
+                  <label title="The part of the timeline between the in mark (I) and the out mark (O)"><input type="checkbox" aria-label="Export only the selected region" checked={useRange} onChange={(e) => setUseRange(e.target.checked)} /> Export only the selected region: {rangeIn!.toFixed(2)} s to {rangeOut!.toFixed(2)} s ({(rangeOut! - rangeIn!).toFixed(2)} s)</label>
+                </Row>
+              )}
               <Row label="Save to">
                 <input readOnly value={settings.outputPath} placeholder="Choose a file…" className="grow" aria-label="Output file" />
                 <button onClick={() => void browse()}>Browse</button>
@@ -185,19 +205,29 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
                 <span className="dim">fps</span>
                 <datalist id="fps-presets">{[24, 25, 30, 50, 60, 120, 240].map((f) => <option key={f} value={f} />)}</datalist>
               </Row>
-              <Row label="Codec">
-                <select value={settings.codec} onChange={(e) => set({ codec: e.target.value as ExportSettings['codec'] })}>
-                  <option value="h264">H.264 (plays everywhere)</option>
-                  <option value="h265">H.265 / HEVC (smaller files)</option>
+              <Row label="Encoder">
+                <select aria-label="Encoder" value={`${settings.codec}-${settings.encoder ?? 'cpu'}`} onChange={(e) => { const [codec, encoder] = e.target.value.split('-'); set({ codec: codec as ExportSettings['codec'], encoder: encoder as 'cpu' | 'nvenc' }) }}>
+                  <option value="h264-cpu">H.264 · processor (x264, plays everywhere)</option>
+                  <option value="h264-nvenc" disabled={encoders?.h264_nvenc?.ok === false}>H.264 · NVIDIA graphics card (NVENC){encoders?.h264_nvenc?.ok === false ? ' (not available)' : ''}</option>
+                  <option value="h265-cpu">H.265 / HEVC · processor (x265, smaller files)</option>
+                  <option value="h265-nvenc" disabled={encoders?.hevc_nvenc?.ok === false}>H.265 / HEVC · NVIDIA graphics card (NVENC){encoders?.hevc_nvenc?.ok === false ? ' (not available)' : ''}</option>
                 </select>
               </Row>
+              {settings.encoder === 'nvenc' && encoders && !(settings.codec === 'h265' ? encoders.hevc_nvenc?.ok : encoders.h264_nvenc?.ok) && <p className="notice small" role="alert">{(settings.codec === 'h265' ? encoders.hevc_nvenc : encoders.h264_nvenc)?.reason}</p>}
+              {encoders && (encoders.h264_nvenc?.ok === false) && <p className="hint">The graphics-card choices are off because: {encoders.h264_nvenc.reason}</p>}
               <Row label="Quality">
                 <select value={useBitrate ? 'bitrate' : settings.crf} onChange={(e) => { if (e.target.value === 'bitrate') setUseBitrate(true); else { setUseBitrate(false); set({ crf: Number(e.target.value) }) } }}>
                   {QUALITY.map((q) => <option key={q.crf} value={q.crf}>{q.label}</option>)}
                   <option value="bitrate">Fixed bitrate…</option>
                 </select>
               </Row>
-              {useBitrate && <Num label="Video kbps" value={settings.videoBitrateKbps ?? 12000} min={500} max={100000} step={500} onChange={(v) => set({ videoBitrateKbps: v })} />}
+              {useBitrate && (
+                <Row label="Bitrate">
+                  <input type="range" aria-label="Bitrate slider" min={1} max={300} step={1} value={Math.round((settings.videoBitrateKbps ?? 12000) / 1000)} onChange={(ev) => set({ videoBitrateKbps: Number(ev.target.value) * 1000 })} style={{ flex: 1 }} />
+                  <input type="number" aria-label="Bitrate in Mbps" min={1} max={400} step={1} value={Math.round((settings.videoBitrateKbps ?? 12000) / 1000)} onChange={(ev) => set({ videoBitrateKbps: Math.max(1, Math.min(400, Number(ev.target.value) || 12)) * 1000 })} style={{ width: 70 }} />
+                  <strong className="bitrate-readout" aria-live="polite">{Math.round((settings.videoBitrateKbps ?? 12000) / 1000)} Mbps</strong>
+                </Row>
+              )}
               <Row label="Audio">
                 <select value={settings.audioBitrateKbps} onChange={(e) => set({ audioBitrateKbps: Number(e.target.value) })}>
                   {[128, 192, 256, 320].map((b) => <option key={b} value={b}>AAC {b} kbps</option>)}
@@ -210,7 +240,7 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
                 <select value={settings.motionBlur.mode} onChange={(e) => set({ motionBlur: { ...settings.motionBlur, mode: e.target.value as ExportSettings['motionBlur']['mode'] } })} aria-label="Motion blur">
                   <option value="off">Off</option>
                   <option value="interpolini">interpolini (RIFE / SVP, graphics card)</option>
-                  <option value="quick">Quick (this editor's simple timeline blend)</option>
+                  <option value="quick">Frame blending (in this editor: Vegas-style or simple)</option>
                 </select>
               </Row>
               {settings.motionBlur.mode === 'interpolini' && (
@@ -223,15 +253,17 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
               )}
               {settings.motionBlur.mode === 'quick' && (
                 <>
-                  <Num label="Blur amount" value={settings.motionBlur.amount} min={0.1} max={1.5} step={0.05} onChange={(v) => set({ motionBlur: { ...settings.motionBlur, amount: v } })} />
-                  <Num label="Blend frames" value={settings.motionBlur.samples} min={4} max={32} step={1} onChange={(v) => set({ motionBlur: { ...settings.motionBlur, samples: v } })} />
+                  <Num label={settings.motionBlur.weighting === 'vegas' ? 'Intensity' : 'Blur amount'} value={settings.motionBlur.amount} min={0.1} max={settings.motionBlur.weighting === 'vegas' ? 2 : 1.5} step={0.05} onChange={(v) => set({ motionBlur: { ...settings.motionBlur, amount: v } })} />
+                  {settings.motionBlur.weighting !== 'vegas' && <Num label="Blend frames" value={settings.motionBlur.samples} min={4} max={32} step={1} onChange={(v) => set({ motionBlur: { ...settings.motionBlur, samples: v } })} />}
                   <Row label="Weighting">
-                    <select value={settings.motionBlur.weighting} onChange={(e) => set({ motionBlur: { ...settings.motionBlur, weighting: e.target.value as ExportSettings['motionBlur']['weighting'] } })} aria-label="Blur weighting">
+                    <select value={settings.motionBlur.weighting} onChange={(e) => { const weighting = e.target.value as ExportSettings['motionBlur']['weighting']; set({ motionBlur: { ...settings.motionBlur, weighting, ...(weighting === 'vegas' ? { amount: 1 } : {}) } }) }} aria-label="Blur weighting">
+                      <option value="vegas">Vegas (resample: edge frames count half)</option>
                       <option value="equal">Equal (even streaks)</option>
                       <option value="gaussian">Gaussian (soft, centred)</option>
                       <option value="triangle">Triangle</option>
                     </select>
                   </Row>
+                  {settings.motionBlur.weighting === 'vegas' && <p className="hint blur-hint" role="status">{vegasNote(footageFps, settings.fps, settings.motionBlur.amount)}</p>}
                   <p className="hint blur-hint">Blends several moments of the timeline inside each frame. It blurs motion that is animated or filmed at a high frame rate; footage shot at a low frame rate stays steppy (use interpolini for that). Cost grows with Blend frames.</p>
                 </>
               )}

@@ -5,6 +5,7 @@ import type { MediaAsset } from '@shared/types'
 import { useEditor } from './store'
 import { player } from './engine/player'
 import { dropTargetAt } from './components/Timeline'
+import { clearGhost, useGhost } from './dragGhost'
 
 export const useDrop = create<{ over: boolean; note: string }>(() => ({ over: false, note: '' }))
 
@@ -57,13 +58,22 @@ export function useFileDrop(mode: 'project' | 'home'): void {
   useEffect(() => {
     let depth = 0
     const enter = (e: DragEvent): void => { if (hasFiles(e)) { depth++; useDrop.setState({ over: true }) } }
-    const over = (e: DragEvent): void => { if (hasFiles(e)) { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy' } }
-    const leave = (e: DragEvent): void => { if (hasFiles(e) && --depth <= 0) { depth = 0; useDrop.setState({ over: false }) } }
+    const over = (e: DragEvent): void => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+      // Show where the first file would land: a faint clip on the lane under the pointer.
+      const lane = mode === 'project' ? dropTargetAt({ x: e.clientX, y: e.clientY }) : null
+      if (lane) useGhost.setState({ trackId: lane.trackId, time: lane.time, duration: 5, label: 'New clip' })
+      else clearGhost()
+    }
+    const leave = (e: DragEvent): void => { if (hasFiles(e) && --depth <= 0) { depth = 0; useDrop.setState({ over: false }); clearGhost() } }
     const drop = (e: DragEvent): void => {
       if (!hasFiles(e)) return
       e.preventDefault()
       depth = 0
       useDrop.setState({ over: false })
+      clearGhost()
       const paths = Array.from(e.dataTransfer?.files ?? []).map((f) => window.api.media.pathForFile(f)).filter(Boolean)
       if (mode === 'home') {
         // On the start screen the first file becomes a new project, and the others go into its library.

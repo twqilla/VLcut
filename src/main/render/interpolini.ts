@@ -10,6 +10,7 @@ import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { InterpoliniStatus } from '@shared/types'
+import { explainExit } from '@shared/winExit'
 import { type InterpoliniSettings, interpoliniArgs, parseInterpoliniLine } from '@shared/render/interpolini'
 
 const exe = process.platform === 'win32' ? 'interpolini-cli.exe' : 'interpolini-cli'
@@ -45,7 +46,15 @@ export async function interpoliniStatus(userDir: string): Promise<InterpoliniSta
   const canAutoInstall = process.platform === 'win32'
   if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
   const info = await new Promise<string>((resolve) =>
-    execFile(path, ['--version'], { timeout: 20000 }, (err, stdout, stderr) => resolve(err ? `It could not be started: ${(stderr || err.message).trim().slice(0, 200)}` : stdout.trim().split('\n')[0] || 'interpolini'))
+    execFile(path, ['--version'], { timeout: 20000 }, (err, stdout, stderr) => {
+      const text = `${stdout}\n${stderr}`.trim()
+      if (!err) return resolve(text.split('\n')[0].trim() || 'ready')
+      // Some builds have no --version: if the program ran and printed its usage, it works.
+      if (typeof (err as { code?: unknown }).code === 'number' && /interpolini|usage|options/i.test(text)) return resolve(text.split('\n')[0].trim().slice(0, 120))
+      const code = (err as { code?: unknown }).code
+      const why = typeof code === 'number' ? explainExit(code, null) : (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'The file is missing. Download interpolini again.' : String((err as { killed?: boolean }).killed ? 'It did not answer in time.' : err.message.split('\n')[0]).slice(0, 200)
+      resolve(`It could not be started. ${why}${text ? ` Its own message: ${text.slice(0, 160)}` : ''}`)
+    })
   )
   return { path, info, canAutoInstall }
 }
@@ -106,7 +115,7 @@ export function runInterpolini(cli: string, clip: string, settings: InterpoliniS
       take(buffered)
       // The real program reports the path as it was given to it; resolve a relative one against the clip's folder.
       if (output && !failure) return resolve(isAbsolute(output) ? output : join(dirname(clip), output))
-      reject(new Error(`interpolini failed: ${failure || stderr.trim() || `it exited with code ${code} without producing a file`}`))
+      reject(new Error(`interpolini failed: ${failure || stderr.trim() || `${explainExit(code, null)} No file was produced.`}`))
     })
   })
 }

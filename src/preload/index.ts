@@ -26,6 +26,7 @@ const api: Api = {
     }
   },
   interpolini: {
+    cfg: { list: () => ipcRenderer.invoke('cfg:list'), save: (name: string, text: string) => ipcRenderer.invoke('cfg:save', name, text), read: (name: string) => ipcRenderer.invoke('cfg:read', name), remove: (name: string) => ipcRenderer.invoke('cfg:delete', name), edit: (name: string) => ipcRenderer.invoke('cfg:edit', name) },
     status: () => ipcRenderer.invoke('interpolini:status'),
     install: () => ipcRenderer.invoke('interpolini:install'),
     onProgress: (listener) => {
@@ -115,6 +116,7 @@ const api: Api = {
     showInFolder: (path) => ipcRenderer.send('system:showInFolder', path)
   },
   exporter: {
+    encoders: () => ipcRenderer.invoke('export:encoders'),
     pickPath: (defaultName) => ipcRenderer.invoke('export:pickPath', defaultName),
     start: (project, settings) => ipcRenderer.invoke('export:start', project, settings),
     cancel: (jobId) => ipcRenderer.invoke('export:cancel', jobId),

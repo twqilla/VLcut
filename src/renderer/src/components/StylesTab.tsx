@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Project } from '@shared/types'
-import { BUILTIN_STYLES, type StyleDef, withIntensity } from '@shared/styles/styles'
+import { COLOUR_STYLES, type StyleDef, gradeOnly, withIntensity } from '@shared/styles/styles'
 import { applyStyle } from '@shared/agent/tools'
 import { projectDuration } from '@shared/timeline/ops'
 import { useEditor } from '../store'
@@ -24,7 +24,7 @@ function StyleThumb({ style, project }: { style: StyleDef; project: Project }) {
 
 export function StylesTab() {
   const project = useEditor((s) => s.project!)
-  const custom = useAssistant((s) => s.customStyles)
+  const custom = useAssistant((s) => s.customStyles).map(gradeOnly)
   const [intensity, setIntensity] = useState(1)
   const [name, setName] = useState('')
   const empty = projectDuration(project) <= 0
@@ -32,17 +32,11 @@ export function StylesTab() {
 
   useEffect(() => void refreshAssistantEnvironment(), [])
 
-  const apply = (style: StyleDef) => void runSteps(`${style.name} style`, [{ tool: 'applyStyle', args: { styleId: style.id, intensity }, description: `Apply the ${style.name} style: ${style.description}` }])
+  const apply = (style: StyleDef) => void runSteps(`${style.name} style`, [{ tool: 'applyStyle', args: { styleId: style.id, intensity, colourOnly: 1 }, description: `Apply the ${style.name} colour style: ${style.description}` }])
 
   /** Captures the look as it stands on the timeline (including the user's tweaks) as a reusable style. */
   const saveVariation = async () => {
-    const base = [...custom, ...BUILTIN_STYLES].find((s) => applied && s.look.length === applied.effects.length && s.look.every((e, i) => e.type === applied.effects[i].type)) ?? BUILTIN_STYLES[0]
-    const texts = project.tracks.flatMap((t) => t.clips).filter((c) => c.text)
-    const strip = (t: (typeof texts)[number] | undefined) => {
-      if (!t?.text) return undefined
-      const { content: _c, words: _w, ...look } = t.text
-      return look
-    }
+    const base = [...custom, ...COLOUR_STYLES].find((s) => applied && s.look.length === applied.effects.length && s.look.every((e, i) => e.type === applied.effects[i].type)) ?? COLOUR_STYLES[0]
     const style: StyleDef = {
       ...base,
       id: `custom-${Date.now()}`,
@@ -50,8 +44,7 @@ export function StylesTab() {
       tagline: 'Saved variation',
       builtin: false,
       look: (applied?.effects ?? []).filter((e) => e.enabled).map((e) => ({ type: e.type, params: { ...e.params } })),
-      title: strip(texts.find((c) => c.origin !== 'caption')) ?? base.title,
-      caption: strip(texts.find((c) => c.origin === 'caption')) ?? base.caption
+      title: {}, caption: {}, gradeOnly: true
     }
     await window.api.styles.save(style)
     setName('')
@@ -67,7 +60,7 @@ export function StylesTab() {
         <span className="dim">{Math.round(intensity * 100)}%</span>
       </label>
       <div className="style-list">
-        {[...custom, ...BUILTIN_STYLES].map((style) => (
+        {[...custom, ...COLOUR_STYLES].map((style) => (
           <article key={style.id} className="style-card">
             <button className="style-apply" disabled={empty} onClick={() => apply(style)} title="Apply to the timeline (one undo step)">
               {!empty && <StyleThumb style={withIntensity(style, intensity)} project={project} />}
@@ -81,7 +74,7 @@ export function StylesTab() {
       </div>
       <div className="style-save">
         <h3>Save your variation</h3>
-        <p className="hint">Apply a style, adjust the Look layer, titles and captions to taste, then save the result as your own style.</p>
+        <p className="hint">Apply a style, adjust the Look layer to taste, then save the result as your own style.</p>
         <div className="row">
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Style name" aria-label="Style name" />
           <button disabled={!applied} onClick={() => void saveVariation()}>Save</button>

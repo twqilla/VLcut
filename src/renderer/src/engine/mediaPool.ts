@@ -294,7 +294,14 @@ function seekExact(el: HTMLVideoElement, target: number): Promise<void> {
     const fail = (): void => reject(new Error(`Could not decode ${decodeURIComponent(el.src)}`))
     const seek = (): void => {
       if (Math.abs(el.currentTime - target) < 1e-4 && !el.seeking && el.readyState >= 2) return resolve()
-      el.addEventListener('seeked', () => resolve(), { once: true })
+      // 'seeked' can fire before the new frame is what drawImage sees, which sampled a stale frame at 120 fps.
+      // requestVideoFrameCallback fires once the frame is presented; the timer keeps hidden players from hanging.
+      el.addEventListener('seeked', () => {
+        const rvfc = (el as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number }).requestVideoFrameCallback
+        if (!rvfc) return resolve()
+        const timer = setTimeout(resolve, 250)
+        rvfc.call(el, () => { clearTimeout(timer); resolve() })
+      }, { once: true })
       el.currentTime = target
     }
     el.addEventListener('error', fail, { once: true })

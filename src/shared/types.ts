@@ -195,6 +195,10 @@ export interface TextProps {
   tilt: number
   /** Key into the text animation registry. */
   animation: string
+  /** Typed out: seconds the whole text takes to type (unset = about 26 letters a second). */
+  typeSeconds?: number
+  /** Typed out: show a blinking cursor after the last letter (on unless false). */
+  typeCursor?: boolean
   /** Word timings; present on captions generated from speech. */
   words?: Word[]
   /** Colour of the word being spoken, for word-timed captions. */
@@ -435,7 +439,7 @@ export interface MotionBlurSettings {
   /** Quick mode: moments blended per frame. */
   samples: number
   /** Quick mode: how strongly the middle of the exposure counts compared with its ends. */
-  weighting: 'equal' | 'gaussian' | 'triangle'
+  weighting: 'equal' | 'gaussian' | 'triangle' | 'vegas'
   /** Settings passed to interpolini when mode is 'interpolini'. */
   interpolini: InterpoliniSettings
 }
@@ -456,6 +460,8 @@ export interface ExportSettings {
   height: number
   fps: number
   codec: 'h264' | 'h265'
+  /** Which encoder makes the video: the processor (default) or an NVIDIA graphics card (NVENC). */
+  encoder?: 'cpu' | 'nvenc'
   /** Constant quality (CRF): lower is better and larger. Ignored when `videoBitrateKbps` is set. */
   crf: number
   videoBitrateKbps?: number
@@ -546,6 +552,15 @@ export interface Api {
     onProgress(listener: (p: { jobId: string; text: string }) => void): () => void
   }
   interpolini: {
+    /** Saved configurations: plain .cfg files that can also be edited in Notepad. */
+    cfg: {
+      list(): Promise<string[]>
+      save(name: string, text: string): Promise<string>
+      read(name: string): Promise<string>
+      remove(name: string): Promise<void>
+      /** Opens the file in Notepad (Windows) or the system's text editor. */
+      edit(name: string): Promise<void>
+    }
     status(): Promise<InterpoliniStatus>
     /** Downloads interpolini (Windows). Needs internet once. */
     install(): Promise<InterpoliniStatus>
@@ -689,6 +704,8 @@ export interface Api {
     showInFolder(path: string): void
   }
   exporter: {
+    /** Whether the graphics-card encoders (NVENC) work on this computer, and why not when they do not. */
+    encoders(): Promise<Record<string, { ok: boolean; reason: string }>>
     /** Asks where to save. Returns null if the user cancels. */
     pickPath(defaultName: string): Promise<string | null>
     start(project: Project, settings: ExportSettings): Promise<string>

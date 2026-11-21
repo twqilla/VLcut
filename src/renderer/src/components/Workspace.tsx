@@ -10,12 +10,13 @@ import { ExportDialog } from './ExportDialog'
 import { AssistantPanel } from './AssistantPanel'
 import { SettingsDialog } from './SettingsDialog'
 import { useSettings } from '../settings'
-import { requestShortcutList, togglePreviewFocus, useUi } from '../ui'
+import { clearRange, markIn, markOut, requestShortcutList, setPreviewEdit, togglePreviewFocus, useUi } from '../ui'
 import { bindingMap, comboFromEvent, withKey } from '@shared/shortcuts'
 import { useKeys } from '../keys'
 import { nestSelection, unnestSelection } from '../nest'
 import { useDrop, useFileDrop } from '../dropFiles'
 import { ContextMenu } from './ContextMenu'
+import { InterpoliniStudio } from './InterpoliniStudio'
 import '../jobs'
 import { IS_PREP } from '../App'
 
@@ -37,7 +38,11 @@ const ACTIONS: Record<string, (s: ReturnType<typeof useEditor.getState>) => void
   selectAll: (s) => s.select(s.project!.tracks.flatMap((t) => t.clips.map((c) => c.id))),
   playPause: (s) => { s.selectAsset(null); player.toggle() },
   previewFocus: () => togglePreviewFocus(),
+  previewEdit: () => setPreviewEdit(!useUi.getState().previewEdit),
   split: (s) => s.splitAtPlayhead(),
+  markIn: () => markIn(player.time),
+  markOut: () => markOut(player.time),
+  clearRange: () => clearRange(),
   delete: (s) => s.deleteSelection(),
   stepBack: () => player.step(-1),
   stepForward: () => player.step(1),
@@ -63,7 +68,10 @@ function useShortcuts(): void {
       // Leave typing alone (saving still works from a text field).
       const el = e.target as HTMLElement
       const typing = el.isContentEditable || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || (el.tagName === 'INPUT' && (el as HTMLInputElement).type !== 'range' && (el as HTMLInputElement).type !== 'checkbox')
-      if (typing && id !== 'save') return
+      // Undo and redo also work from a select, a number box or a colour picker (they have no text history worth keeping),
+      // so the last change is always the one that is undone, wherever the focus happens to be.
+      const plainField = el.tagName === 'SELECT' || (el.tagName === 'INPUT' && ['number', 'color'].includes((el as HTMLInputElement).type))
+      if (typing && id !== 'save' && !((id === 'undo' || id === 'redo') && plainField)) return
       e.preventDefault()
       ACTIONS[id]?.(useEditor.getState())
     }
@@ -81,6 +89,7 @@ export function Workspace() {
   const [library, resizeLibrary] = usePanelSize('libraryHeight', 260, 150, 640)
   const [inspector, resizeInspector] = usePanelSize('inspectorHeight', 300, 140, 700)
   const [exporting, setExporting] = useState(false)
+  const [studio, setStudio] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState<'Theme' | 'Shortcuts' | false>(false)
   const keyOverrides = useKeys((s) => s.overrides)
   const shortcutRequests = useUi((s) => s.shortcutRequests)
@@ -147,12 +156,14 @@ export function Workspace() {
             <option value="send" disabled={!hasSelection}>Send selected clips to clip prep</option>
           </select>
           <button onClick={() => void window.api.window.toggleFullscreen()} aria-label="Full screen" title="Full screen (F11)">Full screen</button>
+          <button onClick={() => setStudio(true)} aria-label="Interpolini" title="Motion blur and frame blending (interpolini)">Interpolini</button>
           <button onClick={() => setSettingsOpen('Theme')} aria-label="Settings" title="Theme, colours, fonts and layout">Settings</button>
           <button className="primary" onClick={() => { player.pause(); setExporting(true) }}>Export</button>
         </header>
       )}
       {exporting && <ExportDialog onClose={() => setExporting(false)} />}
       <ContextMenu />
+      {studio && <InterpoliniStudio onClose={() => setStudio(false)} />}
       {dropOver && <div className="drop-overlay" role="status"><strong>Drop your files here</strong><span>Drop on the timeline to place them there, anywhere else to add them to the library. Folders work too.</span></div>}
       {dropNote && <div className="drop-toast" role="status">{dropNote}</div>}
       {settingsOpen && <SettingsDialog key={settingsOpen} initialTab={settingsOpen} onClose={() => setSettingsOpen(false)} />}

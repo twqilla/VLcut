@@ -44,6 +44,9 @@ const PATHS: Record<string, string> = {
   scan: 'M3 8V4h4M21 8V4h-4M3 16v4h4M21 16v4h-4',
   grid: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
   copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+  move: 'M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3',
+  zoomIn: 'M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15zM21 21l-5.2-5.2M10.5 7.5v6M7.5 10.5h6',
+  zoomOut: 'M10.5 18a7.5 7.5 0 100-15 7.5 7.5 0 000 15zM21 21l-5.2-5.2M7.5 10.5h6',
   mic: 'M12 3a3 3 0 013 3v6a3 3 0 01-6 0V6a3 3 0 013-3zM5 11a7 7 0 0014 0M12 18v3'
 }
 

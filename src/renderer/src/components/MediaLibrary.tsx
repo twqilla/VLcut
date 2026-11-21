@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useEditor } from '../store'
 import { formatDuration } from '../format'
 import { ASSET_MIME } from './Timeline'
+import { clearGhost, dragPayload } from '../dragGhost'
 import { describeShots, useJobs } from '../jobs'
 import { useEffect } from 'react'
 import { searchMedia } from '@shared/analysis/search'
@@ -88,7 +89,10 @@ export function MediaLibrary() {
                 onDragStart={(e) => {
                   e.dataTransfer.setData(ASSET_MIME, m.id)
                   e.dataTransfer.effectAllowed = 'copy'
+                  dragPayload.duration = m.duration > 0 ? m.duration : 5
+                  dragPayload.label = m.name
                 }}
+                onDragEnd={clearGhost}
                 onClick={() => selectAsset(m.id === selectedAssetId ? null : m.id)}
                 onDoubleClick={() => useEditor.getState().insertAsset(m.id)}
                 title={`${m.path}\nDrag onto the timeline, or double-click to add at the end.`}

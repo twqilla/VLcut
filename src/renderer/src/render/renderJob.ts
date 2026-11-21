@@ -2,6 +2,7 @@
 import { Compositor } from '../engine/compositor'
 import { MediaPool } from '../engine/mediaPool'
 import { ensureFonts } from '../engine/fonts'
+import { vegasWindow } from '@shared/render/vegasBlend'
 
 export async function runRenderJob(jobId: string): Promise<void> {
   try {
@@ -16,7 +17,10 @@ export async function runRenderJob(jobId: string): Promise<void> {
     await ensureFonts()
     const blur = job.motionBlur
     // Only quick mode blends moments here. interpolini mode already blurred the footage before this window started.
-    const samples = blur.mode === 'quick' ? Math.max(1, blur.samples) : 1
+    // Vegas-style: blend the footage's own frames (e.g. four 240 fps frames, edges at half weight) into each output frame.
+    const footageFps = Math.max(1, ...job.project.media.filter((m) => m.kind === 'video').map((m) => m.fps ?? 0))
+    const vegas = blur.mode === 'quick' && blur.weighting === 'vegas' ? vegasWindow(footageFps, job.fps, blur.amount) : null
+    const samples = vegas ? vegas.weights.length : blur.mode === 'quick' ? Math.max(1, blur.samples) : 1
     const weight = (u: number): number => (blur.weighting === 'gaussian' ? Math.exp(-0.5 * (u / 0.45) ** 2) : blur.weighting === 'triangle' ? 1 - 0.95 * Math.abs(u) : 1)
     const lastTime = (job.totalFrames - 0.5) / job.fps
     const subCanvas = document.createElement('canvas')
@@ -35,8 +39,11 @@ export async function runRenderJob(jobId: string): Promise<void> {
         let total = 0
         for (let k = 0; k < samples; k++) {
           const u = (2 * k + 1) / samples - 1 // -1 .. 1 across the exposure
-          const t = Math.max(0, Math.min(lastTime, time + (u * 0.5 * blur.amount) / job.fps))
-          const w = weight(u)
+          const t = vegas
+            // Sampled in the middle of each footage frame, so a moment on a frame boundary cannot pick the wrong neighbour.
+            ? Math.max(0, Math.min(lastTime, time + 0.5 / job.fps + vegas.offsets[k] + 0.5 / footageFps))
+            : Math.max(0, Math.min(lastTime, time + (u * 0.5 * blur.amount) / job.fps))
+          const w = vegas ? vegas.weights[k] : weight(u)
           total += w
           await pool.prepareExact(job.project, t)
           compositor.render(sub, job.project, t, pool)

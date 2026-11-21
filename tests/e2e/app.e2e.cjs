@@ -175,6 +175,23 @@ async function main() {
   check('a tooltip shows the name and the shortcut as a key cap', (await win.textContent('.tooltip')).includes('Split at playhead') && (await win.locator('.tooltip kbd:text-is("S")').count()) === 1, await win.textContent('.tooltip'))
   await win.mouse.move(5, 500)
   await win.locator('.clip-video').first().click()
+  await win.waitForSelector('[aria-label="Selection outline"]')
+  check('a selected clip shows only an outline until Edit position is on', (await win.locator('[aria-label="Scale handle bottom-right"]').count()) === 0 && (await win.locator('.sel-handles').count()) === 1)
+  {
+    // With editing off, dragging or scrolling on the picture never moves the clip; the wheel zooms the view and the zoom stays.
+    const cb0 = await win.locator('.preview canvas').boundingBox()
+    await win.mouse.move(cb0.x + cb0.width / 2, cb0.y + cb0.height / 2)
+    await win.mouse.down(); await win.mouse.move(cb0.x + cb0.width / 2 + 70, cb0.y + cb0.height / 2 + 30, { steps: 5 }); await win.mouse.up()
+    const xNow = await win.inputValue('label.field:has-text("Scale") input[type=number]')
+    await win.mouse.wheel(0, -300)
+    await win.waitForTimeout(150)
+    const zoomed = await win.textContent('button[aria-label="Fit view"]')
+    check('dragging the picture does not move the clip while editing is off', Number(xNow) === 1 && !(await win.locator('[aria-label="Scale handle bottom-right"]').count()))
+    check('the mouse wheel zooms the view (not the clip) and the zoom is shown', parseInt(zoomed) > 120 && Number(await win.inputValue('label.field:has-text("Scale") input[type=number]')) === 1, zoomed)
+    await win.click('button[aria-label="Fit view"]')
+    check('the percentage button fits the whole picture again', (await win.textContent('button[aria-label="Fit view"]')) === '100%')
+  }
+  await win.click('button[aria-label="Edit position"]')
   await win.waitForSelector('[aria-label="Selection handles"]')
   const scaleBox = () => win.inputValue('label.field:has-text("Scale") input[type=number]')
   const handle = await win.locator('[aria-label="Scale handle bottom-right"]').boundingBox()
@@ -184,6 +201,7 @@ async function main() {
   await win.mouse.move(handle.x + 5 + 60, handle.y + 5 + 40, { steps: 6 })
   await win.mouse.up()
   const grown = Number(await scaleBox())
+  await win.waitForTimeout(400) // the handles follow the picture a moment later
   check('dragging a corner handle scales the clip', grown > 1.08, `scale ${grown}`)
   const rot = await win.locator('[aria-label="Rotate handle"]').boundingBox()
   await win.mouse.move(rot.x + rot.width / 2, rot.y + rot.height / 2)
@@ -629,7 +647,7 @@ async function main() {
   check('re-styling replaces the old look', (await win.locator('.clip-adjust').count()) === 1)
   await win.click('role=tab[name="History"]')
   await win.waitForFunction(() => document.querySelectorAll('.apply-list button').length >= 2, null, { timeout: 8000 }).catch(() => undefined)
-  check('history marks assistant edits and lists restore points', (await win.locator('.history .badge').count()) >= 2 && (await win.locator('.apply-list button').count()) >= 2)
+  check('history marks assistant edits and lists restore points', (await win.locator('.history-list .badge').count()) >= 2 && (await win.locator('.apply-list button').count()) >= 2)
 
   // ---- Clips tab: open recordings directly, trim losslessly, send to the editor ----
   const clipsDir = path.join(work, 'recordings')
@@ -853,6 +871,7 @@ async function main() {
   // Every frame is either fully black or fully white, so a mixed frame is unmistakably blended.
   execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=gray:s=320x180:r=30:d=2', '-vf', "geq=lum='255*mod(N,2)':cb=128:cr=128", '-pix_fmt', 'yuv420p', '-g', '1', flicker])
   await importFiles([flicker])
+  await win.waitForSelector('.media-item')
   await win.dblclick('.media-item')
   await win.waitForSelector('.clip')
   await win.click('.clip >> nth=0')
@@ -984,7 +1003,11 @@ async function main() {
   await win.click('role=tab[name="Audio"]')
   await win.uncheck('text=Automatically remove the audio from clips I add')
   // Snare detection runs in the background; the timeline ruler then shows snare marks.
-  await win.waitForSelector('.mark.snare', { timeout: 90000 })
+  // The red marks are hidden until asked for (the Snares button), so they do not look like stray markers.
+  await win.waitForSelector('button:text-is("Snares")', { timeout: 90000 })
+  check('beat and snare marks are hidden by default', (await win.locator('.mark.snare, .mark.beat').count()) === 0)
+  await win.click('button:text-is("Snares")')
+  await win.waitForSelector('.mark.snare', { timeout: 10000 })
   const snareCount = await win.locator('.mark.snare').count()
   check('detected snares are marked on the timeline ruler', snareCount >= 11 && snareCount <= 13, `${snareCount} snare marks for 12 expected`)
   check('beat and snare snapping buttons appear', (await win.locator('button:text-is("Snares")').count()) === 1 && (await win.locator('button:text-is("Beats")').count()) === 1)
@@ -1005,7 +1028,7 @@ async function main() {
   await win.click('button:has-text("Remove audio from selected clips")')
   check('remove audio works on the selection', (await win.locator('.clip-video .clip-label:has-text("no sound")').count()) >= 1)
   await win.click('role=tab[name="History"]')
-  check('assistant-style audio tools appear in the history', (await win.locator('.history').textContent()).includes('Cut the footage'))
+  check('assistant-style audio tools appear in the history', (await win.locator('.history-list').textContent()).includes('Cut the footage'))
 
   // ---- Stabilise, track a point, attach a clip to it, auto reframe ----
   await goHome()
@@ -1356,6 +1379,7 @@ async function main() {
     await win.keyboard.press('Home')
     for (let i = 0; i < 6; i++) await win.keyboard.press('Shift+ArrowRight')
     await win.keyboard.press('Control+a')
+    if ((await win.getAttribute('button[aria-label="Edit position"]', 'aria-pressed')) !== 'true') await win.click('button[aria-label="Edit position"]')
     await win.waitForSelector('[aria-label="Group selection handles"]', { timeout: 8000 })
     check('selecting two clips shows one set of group handles', (await win.locator('[aria-label="Group selection handles"]').count()) === 1 && (await win.locator('[aria-label="Scale handle bottom-right"]').count()) === 1)
     /** Bounding box of the lit pixels in the preview, as [x0, x1, y0, y1]. */
@@ -1503,6 +1527,14 @@ async function main() {
     await win.fill('.text-editor input[aria-label="Lasts"]', '2')
     await win.waitForTimeout(300)
     check('the editor sets font, look, position and timing', (await win.inputValue('.text-editor input[aria-label="Starts at"]')) === '1' && (await win.inputValue('.text-editor input[aria-label="Lasts"]')) === '2' && (await win.inputValue('.text-editor select[aria-label="Font"]')) === 'Orbitron', await win.inputValue('.text-editor select[aria-label="Font"]'))
+    // Typed out: adjustable typing time and a blinking cursor.
+    check('Typed out options are hidden for other animations', (await win.locator('.text-editor input[aria-label="Typing time"]').count()) === 0)
+    await win.selectOption('.text-editor select[aria-label="Animation in"]', 'typewriter')
+    await win.waitForSelector('.text-editor input[aria-label="Typing time"]')
+    await win.fill('.text-editor input[aria-label="Typing time"]', '1')
+    await win.waitForTimeout(200)
+    check('Typed out has a typing time and a blinking cursor switch', (await win.inputValue('.text-editor input[aria-label="Typing time"]')) === '1' && (await win.locator('.text-editor input[aria-label="Blinking cursor"]').isChecked()))
+    check('Font size is a plain number of points', (await win.locator('.text-editor input[aria-label="Font size"]').count()) === 1 && Number(await win.inputValue('.text-editor input[aria-label="Font size"]')) >= 8)
     await win.click('button[aria-label="Close text editor"]')
     check('the editor can be closed', (await win.locator('.text-editor').count()) === 0)
     await win.locator('.clip-text').first().dblclick()
@@ -1564,6 +1596,111 @@ async function main() {
     await win.click('button[aria-label="Full screen"]')
     await win.waitForTimeout(800)
     check('and back out of it again', (await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isFullScreen())) === false)
+  }
+
+  // ---- Vegas-style frame blending: 120 fps footage that flickers white / black, exported at 30 fps ----
+  {
+    const flicker = path.join(work, 'flicker120.mp4')
+    execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=gray:s=320x180:r=120:d=2', '-vf', "geq=lum='255*mod(N,2)':cb=128:cr=128", '-pix_fmt', 'yuv420p', '-g', '1', flicker])
+    await goHome()
+    await newProject('Vegas')
+    await importFiles([flicker])
+    await win.waitForSelector('.media-item')
+    await win.dblclick('.media-item')
+    await win.waitForSelector('.clip-video')
+    const meanOf = (file, frame) => { const raw = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-vf', `select=eq(n\\,${frame}),scale=16:9,format=gray`, '-frames:v', '1', '-f', 'rawvideo', '-']); return raw.reduce((a, b) => a + b, 0) / raw.length }
+    const run = async (file, weighting) => {
+      await app.evaluate(({ dialog }, p) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: p }) }, file)
+      await win.click('.topbar button:has-text("Export")')
+      await win.locator('.modal input[aria-label="Frame rate"]').fill('30')
+      if (weighting) {
+        await win.selectOption('.modal select[aria-label="Motion blur"]', 'quick')
+        await win.selectOption('.modal select[aria-label="Blur weighting"]', weighting)
+      }
+      await win.click('.modal footer button:has-text("Export")')
+      await win.waitForSelector('.export-status.done, .export-status.error', { timeout: 240000 })
+      const status = await win.textContent('.export-status')
+      await win.click('.modal header button')
+      return status
+    }
+    const plainOut = path.join(work, 'vegas-off.mp4'), vegasOut = path.join(work, 'vegas-on.mp4')
+    await run(plainOut, null)
+    const st = await run(vegasOut, 'vegas')
+    const plain = [0, 1, 2, 3].map((f) => meanOf(plainOut, f))
+    const blended = [0, 1, 2, 3, 4].map((f) => meanOf(vegasOut, f))
+    check('without blending the 120 fps flicker lands on single frames (black or white)', plain.every((v) => v < 40 || v > 215), plain.map((v) => v.toFixed(0)).join(','))
+    check('Vegas weighting blends four footage frames into every 30 fps frame (an even grey)', st.includes('Export finished') && blended.every((v) => v > 105 && v < 150), blended.map((v) => v.toFixed(0)).join(','))
+  }
+
+  // ---- Timeline clicks, playhead grip, in/out region, history list, interpolini studio ----
+  {
+    await goHome()
+    await newProject('Timeline')
+    await importFiles([clip])
+    await win.waitForSelector('.media-item')
+    await win.dblclick('.media-item')
+    await win.waitForSelector('.clip-video')
+    await win.click('role=tab[name="Media"]')
+    // Clicking empty space on a lane moves the playhead there.
+    const lane = await win.locator('.lane-video').first().boundingBox()
+    const clipBox = await win.locator('.clip-video').first().boundingBox()
+    // Just below a clip is still empty lane space (the lane is taller than the clip); the playhead lands 80 % along.
+    await win.mouse.click(clipBox.x + clipBox.width * 0.8, clipBox.y + clipBox.height + 5)
+    const t1 = await win.textContent('.timecode')
+    check('clicking empty space on the timeline moves the playhead there', !t1.startsWith('00:00:00 ') && !t1.startsWith('00:06:00 '), t1)
+    // The grip can be dragged.
+    const grip = await win.locator('.playhead-grip').boundingBox()
+    await win.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+    await win.mouse.down()
+    await win.mouse.move(clipBox.x + 30, grip.y + grip.height / 2, { steps: 8 })
+    await win.mouse.up()
+    const t2 = await win.textContent('.timecode')
+    check('the playhead grip can be dragged', t2 !== t1, `${t1} -> ${t2}`)
+    // I and O set the region, and only that part is exported.
+    await win.evaluate(() => document.activeElement && document.activeElement.blur())
+    await win.keyboard.press('Home')
+    for (let i = 0; i < 3; i++) await win.keyboard.press('Shift+ArrowRight') // 1 s
+    await win.keyboard.press('i')
+    for (let i = 0; i < 6; i++) await win.keyboard.press('Shift+ArrowRight') // 3 s
+    await win.keyboard.press('o')
+    check('I and O mark a region on the ruler', (await win.locator('.range-region').count()) === 1 && (await win.locator('.range-flag').count()) === 2)
+    const regionOut = path.join(work, 'region.mp4')
+    await app.evaluate(({ dialog }, p) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: p }) }, regionOut)
+    await win.click('.topbar button:has-text("Export")')
+    check('the export dialog offers the selected region', (await win.locator('input[aria-label="Export only the selected region"]').isChecked()))
+    await win.locator('.modal input[aria-label="Frame rate"]').fill('30')
+    await win.click('.modal footer button:has-text("Export")')
+    await win.waitForSelector('.export-status.done, .export-status.error', { timeout: 240000 })
+    const dur = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', regionOut]).toString())
+    check('only the part between I and O is rendered (2 s of the clip)', Math.abs(dur - 2) < 0.2, `${dur} s`)
+    await win.click('.modal header button')
+    // History is a list: clicking an earlier step goes back and later steps stay redoable.
+    await win.keyboard.press('Home')
+    await win.click('role=tab[name="History"]')
+    await win.evaluate(() => document.activeElement && document.activeElement.blur())
+    const rows = await win.locator('.history-row').count()
+    check('history is a vertical list with the opening state first', rows >= 2 && (await win.locator('.history-row').first().textContent()).includes('Project opened') && (await win.locator('.history-row.current').count()) === 1)
+    await win.locator('.history-row').first().click()
+    check('clicking an earlier step goes back to it and keeps the later ones greyed out', (await win.locator('.clip-video').count()) === 0 && (await win.locator('.history-row.undone').count()) === rows - 1)
+    await win.locator('.history-row').last().click()
+    check('clicking the last step brings everything back', (await win.locator('.clip-video').count()) === 1)
+    // The interpolini studio is its own window with saved configurations.
+    await win.click('button[aria-label="Interpolini"]')
+    await win.waitForSelector('.studio')
+    check('the interpolini studio opens with its own look', (await win.locator('.studio-side').count()) === 1 && (await win.locator('.studio-main input[aria-label="Interpolation"]').count()) === 1)
+    await win.click('button:has-text("Use the Vegas setup")')
+    check('the Vegas setup turns interpolation off and picks Vegas weighting', !(await win.locator('input[aria-label="Interpolation"]').isChecked()) && (await win.inputValue('select[aria-label="Blend weighting"]')) === 'vegas')
+    await win.fill('input[aria-label="New configuration name"]', 'My Vegas')
+    await win.click('button:has-text("Save as new")')
+    await win.waitForSelector('select[aria-label="Saved configurations"] option:has-text("My Vegas")')
+    const cfgText = fs.readFileSync(path.join(work, 'ud', 'interpolini-configs', 'My Vegas.cfg'), 'utf8')
+    check('a configuration is saved as a readable .cfg file', cfgText.includes('[blending]') && cfgText.includes('weighting = vegas') && cfgText.includes('enabled = no'), cfgText.slice(0, 80))
+    fs.writeFileSync(path.join(work, 'ud', 'interpolini-configs', 'My Vegas.cfg'), cfgText.replace('weighting = vegas', 'weighting = pyramid').replace('\n[blending]\n', '\n[blending]\nfps = 24\n'))
+    await win.selectOption('select[aria-label="Saved configurations"]', 'My Vegas')
+    await win.click('button:has-text("Load")')
+    await win.waitForSelector('input[aria-label="Blend down to fps"]', { timeout: 5000 }).catch(() => undefined)
+    check('a configuration edited by hand loads back (and Blend down to is adjustable)', (await win.inputValue('select[aria-label="Blend weighting"]')) === 'pyramid' && (await win.inputValue('input[aria-label="Blend down to fps"]')) === '24')
+    await win.click('button[aria-label="Close interpolini studio"]')
   }
 
   // ---- About and licences ----

@@ -4,7 +4,7 @@ import { clipFromAsset, makeTrack } from '../src/shared/timeline/model'
 import { addClip, clipEnd, projectDuration } from '../src/shared/timeline/ops'
 import * as tools from '../src/shared/agent/tools'
 import { extractJson, planRequest, runStep, validatePlan } from '../src/shared/agent/planner'
-import { BUILTIN_STYLES, findStyle } from '../src/shared/styles/styles'
+import { BUILTIN_STYLES, COLOUR_STYLES, findStyle } from '../src/shared/styles/styles'
 import { effectSpec, EFFECTS, EFFECT_STACKS, makeEffect, TRANSITIONS, TEXT_ANIMATIONS, FONTS } from '../src/shared/effects/registry'
 import { implementedEffects } from '../src/renderer/src/engine/effects'
 import '../src/renderer/src/engine/effects2'
@@ -289,4 +289,24 @@ test('every transition has its own behaviour, not the fade fallback', async () =
     expect(a.incoming.alpha ?? 1, `${t.type} start`).toBeLessThanOrEqual(1)
     expect(b.incoming.alpha ?? 1, `${t.type} end`).toBeGreaterThan(0.9)
   }
+})
+
+test('colour styles only grade: no shakes, pulses, zooms, transitions, sounds or type changes', () => {
+  expect(COLOUR_STYLES).toHaveLength(BUILTIN_STYLES.length)
+  const banned = ['shake', 'zoomPulse', 'slowZoom', 'glitch', 'flicker', 'rgbSplit']
+  for (const s of COLOUR_STYLES) {
+    expect(s.look.some((e) => banned.includes(e.type)), s.id).toBe(false)
+    expect(s.clipEffects, s.id).toEqual([])
+    expect(s.transitions.types, s.id).toEqual([])
+    expect(s.description, s.id).not.toMatch(/shake|pulse|transition|whip|zoom|dissolve|cut|push/i)
+  }
+  let p = tools.addCaptions(tools.removeSilences(project(true)).project).project
+  const before = JSON.stringify(video(p))
+  const styled = tools.applyStyle(p, COLOUR_STYLES.find((s) => s.id === 'hype')!)
+  expect(styled.tracks.find((t) => t.name === 'Look')!.clips[0].effects.length).toBeGreaterThan(0)
+  expect(JSON.stringify(video(styled))).toBe(before) // the footage clips are untouched
+  expect(styled.tracks.find((t) => t.name === 'Style SFX')).toBeUndefined()
+  expect(styled.tracks.find((t) => t.name === 'Captions')!.clips[0].text!.fontFamily).toBe(p.tracks.find((t) => t.name === 'Captions')!.clips[0].text!.fontFamily)
+  p = tools.stripStyle(styled)
+  expect(p.tracks.find((t) => t.name === 'Look')).toBeUndefined()
 })

@@ -18,21 +18,12 @@ import { TemplatesTab } from './TemplatesTab'
 import type { Snapshot } from '@shared/types'
 import { useEffect, useRef, useState } from 'react'
 import { formatDate, mediaUrl } from '../format'
+import { TEXT_PRESETS } from '../textPresets'
+import { TEXT_MIME, clearGhost, dragPayload } from '../dragGhost'
 
 const TABS = ['Media', 'Audio', 'Styles', 'Looks', 'Text', 'Templates', 'Captions', 'Effects', 'Transitions', 'History'] as const
 type Tab = (typeof TABS)[number]
 
-const TEXT_PRESETS: { name: string; sample: string; text: Partial<TextProps> }[] = [
-  { name: 'Headline', sample: 'Headline', text: { content: 'Headline', fontFamily: 'Inter', weight: 900, fontSize: 0.11, animation: 'slideUp' } },
-  { name: 'Editorial pair', sample: 'Bold & italic', text: { content: 'Say it *beautifully.*', fontFamily: 'Inter', weight: 700, fontSize: 0.09, accentFontFamily: 'Instrument Serif', accentItalic: true, color: '#f3ead7', animation: 'words' } },
-  { name: 'Label chip', sample: 'LABEL', text: { content: 'EDITED', fontFamily: 'JetBrains Mono', weight: 700, fontSize: 0.03, letterSpacing: 0.18, uppercase: true, color: '#1a1408', boxColor: '#e8b45a', boxRadius: 0.15, shadow: 0, animation: 'fade' } },
-  { name: 'Impact', sample: 'IMPACT', text: { content: 'IMPACT', fontFamily: 'Anton', weight: 400, fontSize: 0.18, uppercase: true, animation: 'pop' } },
-  { name: 'Serif title', sample: 'A quiet title', text: { content: 'A quiet title', fontFamily: 'Cormorant Garamond', weight: 400, fontSize: 0.1, letterSpacing: 0.04, animation: 'tracking' } },
-  { name: 'Marker', sample: 'Scribble', text: { content: 'VIRAL', fontFamily: 'Permanent Marker', weight: 400, fontSize: 0.16, color: '#ff4a3d', animation: 'drop' } },
-  { name: 'Terminal', sample: '> typed out', text: { content: '> typed out', fontFamily: 'VT323', weight: 400, fontSize: 0.08, color: '#7dff9b', animation: 'typewriter', shadow: 0 } },
-  { name: 'Blocky game', sample: 'CRAFT', text: { content: 'CRAFT', fontFamily: 'Monocraft', weight: 400, fontSize: 0.09, color: '#ffffff', extrudeDepth: 0.02, extrudeAngle: 45, extrudeColor: '#3a3a3a', shadow: 0, animation: 'fade' } },
-  { name: 'Lower third', sample: 'Name · Role', text: { content: 'Name Surname\n*Role or location*', fontFamily: 'DM Sans', weight: 700, fontSize: 0.045, align: 'left', accentFontFamily: 'DM Sans', accentItalic: false, accentColor: '#c9c3b5', boxColor: '#141311', animation: 'fade' } }
-]
 
 function TextTab() {
   const add = (preset: (typeof TEXT_PRESETS)[number]) => {
@@ -50,7 +41,9 @@ function TextTab() {
   return (
     <div className="tile-grid">
       {TEXT_PRESETS.map((preset) => (
-        <button key={preset.name} className="tile" onClick={() => add(preset)} title="Add at the playhead">
+        <button key={preset.name} className="tile" draggable onClick={() => add(preset)} title="Click to add at the playhead, or drag onto the timeline"
+          onDragStart={(e) => { e.dataTransfer.setData(TEXT_MIME, preset.name); e.dataTransfer.effectAllowed = 'copy'; dragPayload.duration = 3; dragPayload.label = preset.name }}
+          onDragEnd={clearGhost}>
           <span className="tile-sample" style={{ fontFamily: `"${preset.text.fontFamily}"`, fontWeight: preset.text.weight, color: preset.text.boxColor ? undefined : preset.text.color }}>{preset.sample}</span>
           <span className="tile-name">{preset.name}</span>
         </button>
@@ -270,8 +263,13 @@ function AudioTab() {
 function HistoryTab() {
   const past = useEditor((s) => s.past)
   const future = useEditor((s) => s.future)
-  const { revertTo, redo } = useEditor.getState()
+  const { undo, redo } = useEditor.getState()
   const projectId = useEditor((s) => s.project!.id)
+  /** Every state the project has been in, oldest first: the opening state, then one per edit, then the undone edits that can still be redone. */
+  const entries = [{ label: 'Project opened', ai: false }, ...past.map((h) => ({ label: h.label, ai: h.source === 'assistant' })), ...[...future].reverse().map((h) => ({ label: h.label, ai: h.source === 'assistant' }))]
+  const current = past.length
+  /** Moves to a state by stepping back or forward, so the later states stay available. */
+  const goTo = (k: number): void => { for (let n = current; n > k; n--) undo(); for (let n = current; n < k; n++) redo() }
   const [snapshots, setSnapshots] = useState<Snapshot[]>([])
   useEffect(() => void window.api.projects.snapshots(projectId).then(setSnapshots), [projectId, past.length])
   const restore = async (snap: Snapshot) => {
@@ -280,22 +278,24 @@ function HistoryTab() {
   }
   return (
     <>
-    {!past.length && !future.length && <p className="empty">Edits you make appear here. Click one to go back to it.</p>}
-    <ol className="history">
-      <li><button onClick={() => revertTo(0)}>Project opened</button></li>
-      {past.map((h, i) => (
-        <li key={i} className={i === past.length - 1 ? 'current' : ''}>
-          <button onClick={() => revertTo(i + 1)}>
-            {h.source === 'assistant' && <span className="badge">AI</span>} {h.label}
-          </button>
-        </li>
-      ))}
-      {[...future].reverse().map((h, i) => (
-        <li key={`f${i}`} className="undone">
-          <button onClick={() => { for (let n = 0; n <= i; n++) redo() }}>{h.label}</button>
+    <div className="history-panel">
+    <p className="hint">Click a step to go back (or forward) to how the project was then. Later steps stay in the list, greyed out, until you make a new edit.</p>
+    <ol className="history-list" role="listbox" aria-label="History" tabIndex={0} onKeyDown={(e) => {
+      if (e.key === 'ArrowUp') { e.preventDefault(); goTo(Math.max(0, current - 1)) }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); goTo(Math.min(entries.length - 1, current + 1)) }
+      else if (e.key === 'Home') { e.preventDefault(); goTo(0) }
+      else if (e.key === 'End') { e.preventDefault(); goTo(entries.length - 1) }
+    }}>
+      {entries.map((h, k) => (
+        <li key={k} role="option" aria-selected={k === current} className={`history-row ${k === current ? 'current' : ''} ${k > current ? 'undone' : ''}`} onClick={() => goTo(k)} title={k === current ? 'The project is at this step' : 'Go to this step'}>
+          <span className="history-num">{k}</span>
+          <span className="history-label">{h.label}</span>
+          {h.ai && <span className="badge">AI</span>}
         </li>
       ))}
     </ol>
+    <div className="row"><button onClick={() => goTo(Math.max(0, current - 1))} disabled={current === 0}>Undo</button><button onClick={() => goTo(Math.min(entries.length - 1, current + 1))} disabled={current >= entries.length - 1}>Redo</button></div>
+    </div>
     {snapshots.length > 0 && (
       <div className="apply-list">
         <h3>Restore points</h3>

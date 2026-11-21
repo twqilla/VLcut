@@ -50,10 +50,16 @@ const jobs = new Map<string, Job>()
 
 const partFile = (job: Job, part: number): string => join(job.partsDir, `part-${String(part).padStart(5, '0')}.mkv`)
 
-function videoArgs(s: ExportSettings): string[] {
-  const video = s.codec === 'h265' ? ['-c:v', 'libx265', '-tag:v', 'hvc1'] : ['-c:v', 'libx264', '-profile:v', 'high']
-  const rate = s.videoBitrateKbps ? ['-b:v', `${s.videoBitrateKbps}k`, '-maxrate', `${Math.round(s.videoBitrateKbps * 1.5)}k`, '-bufsize', `${s.videoBitrateKbps * 2}k`] : ['-crf', String(s.crf)]
-  return [...video, ...rate, '-preset', 'fast', '-pix_fmt', 'yuv420p', '-r', String(s.fps)]
+export function videoArgs(s: ExportSettings): string[] {
+  const gpu = s.encoder === 'nvenc'
+  const video = s.codec === 'h265' ? ['-c:v', gpu ? 'hevc_nvenc' : 'libx265', '-tag:v', 'hvc1'] : ['-c:v', gpu ? 'h264_nvenc' : 'libx264', '-profile:v', 'high']
+  const kbps = s.videoBitrateKbps ? Math.max(100, Math.min(400000, Math.round(s.videoBitrateKbps))) : 0
+  const rate = kbps
+    ? ['-b:v', `${kbps}k`, '-maxrate', `${Math.round(kbps * 1.5)}k`, '-bufsize', `${kbps * 2}k`, ...(gpu ? ['-rc', 'vbr'] : [])]
+    : gpu ? ['-rc', 'vbr', '-cq', String(s.crf), '-b:v', '0'] : ['-crf', String(s.crf)]
+  // NVENC has its own preset names (p1 fastest, p7 best); p5 is a good balance for finished files.
+  const preset = gpu ? ['-preset', 'p5', '-tune', 'hq'] : ['-preset', 'fast']
+  return [...video, ...rate, ...preset, '-pix_fmt', 'yuv420p', '-r', String(s.fps)]
 }
 
 /** Arguments that encode one part from raw frames on stdin. */
@@ -139,7 +145,7 @@ async function closeEncoder(job: Job): Promise<void> {
 /** Brings blur settings from the renderer into range. */
 export function normalizeBlur(b: ExportSettings['motionBlur'] | undefined): ExportSettings['motionBlur'] {
   const mode = b?.mode === 'quick' || b?.mode === 'interpolini' ? b.mode : 'off'
-  return { mode, amount: Math.max(0.05, Math.min(2, Number(b?.amount) || 0.5)), samples: Math.max(2, Math.min(48, Math.round(Number(b?.samples) || 12))), weighting: b?.weighting === 'gaussian' || b?.weighting === 'triangle' ? b.weighting : 'equal', interpolini: normalizeInterpolini(b?.interpolini) }
+  return { mode, amount: Math.max(0.05, Math.min(2, Number(b?.amount) || 0.5)), samples: Math.max(2, Math.min(48, Math.round(Number(b?.samples) || 12))), weighting: b?.weighting === 'gaussian' || b?.weighting === 'triangle' || b?.weighting === 'vegas' ? b.weighting : 'equal', interpolini: normalizeInterpolini(b?.interpolini) }
 }
 
 export async function startExport(ui: WebContents, project: Project, settings: ExportSettings, preloadPath: string, loadRenderer: (win: BrowserWindow, query: string) => void, interpoliniCli: string | null = null): Promise<string> {
@@ -263,4 +269,20 @@ export function failRender(jobId: string, message: string): void {
 export function cancelExport(jobId: string): void {
   const job = jobs.get(jobId)
   if (job) void settle(job, 'cancelled')
+}
+
+/** Tries each encoder on a tiny picture and reports whether it works, and why not when it does not. */
+export async function probeEncoders(): Promise<Record<string, { ok: boolean; reason: string }>> {
+  const { execFile } = await import('node:child_process')
+  const { toolPath } = await import('../media/tools')
+  const test = (encoder: string): Promise<{ ok: boolean; reason: string }> =>
+    new Promise((resolve) =>
+      execFile(toolPath('ffmpeg'), ['-v', 'error', '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.2:r=30', '-frames:v', '3', '-c:v', encoder, '-f', 'null', '-'], { timeout: 20000 }, (err, _o, stderr) => {
+        if (!err) return resolve({ ok: true, reason: '' })
+        const text = stderr.toString()
+        resolve({ ok: false, reason: /not found|Unknown encoder/i.test(text) ? 'This FFmpeg was built without it.' : /nvcuda|No NVENC capable devices|Cannot load|driver/i.test(text) ? 'No NVIDIA graphics card (or a driver that is too old) was found.' : text.trim().split('\n').pop()?.slice(0, 160) || 'It could not start.' })
+      })
+    )
+  const [h264, h265] = await Promise.all([test('h264_nvenc'), test('hevc_nvenc')])
+  return { h264_nvenc: h264, hevc_nvenc: h265 }
 }

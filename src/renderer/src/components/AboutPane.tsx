@@ -19,7 +19,7 @@ export function AboutPane() {
       <p>Free software under the GNU General Public License, version 3 or later. It comes with no warranty. You may use, study, change and share it under that licence, and the source code is yours to have: ask the person who gave you this program, or use VLcut-source.zip from the same place.</p>
       <p>It runs on your computer. It has no accounts or tracking and sends nothing about you anywhere. The few things that use the internet (captions setup and the optional motion-blur tool) are listed under Privacy.</p>
       <p>You are responsible for having the right to use the videos, photos, music and voices you put into your projects, and for following the rules of the sites you post to. The app does not include or download copyrighted music.</p>
-      <p>Built with FFmpeg, Electron, whisper.cpp and open-source fonts. TikTok, YouTube, Instagram, Discord, X, Minecraft, Kodak and Fuji are trademarks of their owners; VLcut is not affiliated with them.</p>
+      <p>Built with FFmpeg, Electron, whisper.cpp and open-source fonts. TikTok, YouTube, Instagram, Discord, X, Minecraft, Kodak and Fuji are trademarks of their owners; VLcut is not affiliated with them, and it is not related to VLC or VideoLAN.</p>
       <div className="row" role="group" aria-label="Legal documents">
         {DOCS.map(([id, label]) => <button key={id} className={open === id ? 'on' : ''} onClick={() => setOpen(open === id ? null : id)}>{label}</button>)}
       </div>

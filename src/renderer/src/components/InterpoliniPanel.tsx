@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { InterpoliniStatus } from '@shared/types'
-import { type InterpoliniSettings, WEIGHTINGS, WEIGHTING_LABELS, blendWeights, describeBlend, resolveRate } from '@shared/render/interpolini'
+import { type InterpoliniSettings, WEIGHTINGS, WEIGHTING_LABELS, blendWeights, describeBlend, sourceRate } from '@shared/render/interpolini'
 import { Num, Row } from './fields'
 
 interface Props {
@@ -38,8 +38,9 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
     }
   }
 
-  const high = resolveRate(settings.fps, clipFps)
-  const weights = blendWeights(high, exportFps, settings.intensity, settings.weighting, settings.custom)
+  const target = settings.blendFps ?? exportFps
+  const high = sourceRate(settings, clipFps)
+  const weights = blendWeights(high, target, settings.intensity, settings.weighting, settings.custom)
   const tallest = Math.max(...weights)
 
   return (
@@ -57,6 +58,10 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
       <p className="hint">
         interpolini interpolates your footage to a very high frame rate with SVP or the RIFE AI model on your graphics card, then blends it back down. It needs a graphics card with Vulkan support and fetches its AI models the first time it runs. Blurs the footage only; text and graphics added in the editor are not blurred.
       </p>
+      <Row label="Interpolation">
+        <label title="On: SVP or RIFE first make many extra frames. Off: only the clip's own frames are blended down, like a Vegas resample (works best with 120 / 240 fps footage)."><input type="checkbox" checked={settings.interpolate} onChange={(e) => set({ interpolate: e.target.checked })} aria-label="Interpolation" /> {settings.interpolate ? 'On: make extra frames first' : 'Off: blend the clip’s own frames'}</label>
+      </Row>
+      {settings.interpolate && (<>
       <Row label="Engine">
         <select value={settings.engine} onChange={(e) => set({ engine: e.target.value as InterpoliniSettings['engine'] })} aria-label="Interpolation engine">
           <option value="svp">SVP (default)</option>
@@ -67,8 +72,10 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
         <input value={settings.fps} onChange={(e) => set({ fps: e.target.value.trim() })} aria-label="Interpolation fps" title="Frames per second, e.g. 960, or a multiple of the clip's rate, e.g. x16" />
         <span className="dim">fps (or x16)</span>
       </Row>
+      </>)}
       <Row label="Blend down to">
-        <span className="dim">{exportFps} fps ({blendLabel})</span>
+        <label title={`Use ${exportFps} fps, ${blendLabel}`}><input type="checkbox" checked={settings.blendFps === undefined} onChange={(e) => set({ blendFps: e.target.checked ? undefined : exportFps })} aria-label="Blend down to the export frame rate" /> same as {blendLabel} ({exportFps} fps)</label>
+        {settings.blendFps !== undefined && <><input type="number" min={1} max={1000} step={1} value={settings.blendFps} aria-label="Blend down to fps" onChange={(e) => set({ blendFps: Math.max(1, Math.min(1000, Math.round(Number(e.target.value) || exportFps))) })} /><span className="dim">fps</span></>}
       </Row>
       <Num label="Intensity" value={settings.intensity} min={0} max={10} step={0.05} onChange={(v) => set({ intensity: v })} />
       <Row label="Weighting">
@@ -97,7 +104,7 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
       <Row label="Duplicates">
         <label title="Removes repeated frames, typical of game capture, before interpolating"><input type="checkbox" checked={settings.dedup} onChange={(e) => set({ dedup: e.target.checked })} aria-label="Remove duplicate frames" /> Remove duplicate frames</label>
       </Row>
-      <details>
+      {settings.interpolate && <details>
         <summary>More interpolini settings</summary>
         <Row label="Half-size search">
           <label><input type="checkbox" checked={settings.half} onChange={(e) => set({ half: e.target.checked })} /> Motion search on a half-size picture (faster)</label>
@@ -117,7 +124,7 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
             <option value="2">Sharp</option><option value="13">Standard</option><option value="23">Smooth</option>
           </select>
         </Row>
-      </details>
+      </details>}
     </div>
   )
 }

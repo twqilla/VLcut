@@ -484,7 +484,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
             </select>
           </Row>
           <Row label="Your fonts"><button onClick={() => void window.api.fonts.import().then((list) => loadCustomFonts(list)).then(() => player.invalidate())}>Add font files…</button></Row>
-          <Num label="Size" value={text.fontSize} min={0.01} max={0.5} step={0.002} onChange={(v) => setText({ fontSize: v }, 'fontSize')} />
+          <Num label="Font size" value={Math.round(text.fontSize * 1080)} min={8} max={540} step={1} onChange={(v) => setText({ fontSize: v / 1080 }, 'fontSize')} />
           <Row label="Weight">
             <select value={text.weight} onChange={(e) => setText({ weight: Number(e.target.value) })}>
               {[400, 500, 600, 700, 900].map((w) => <option key={w}>{w}</option>)}

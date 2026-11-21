@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon, Sr } from './Icon'
-import { setFitRows, setShowTags, setTextEditor, useUi } from '../ui'
+import { clearRange, markIn, markOut, setFitRows, setShowTags, setTextEditor, useUi } from '../ui'
 import { ThumbStrip } from './ThumbStrip'
 import { musicMarks } from '@shared/timeline/marks'
 import type { Clip, Track } from '@shared/types'
@@ -15,6 +15,8 @@ import { canUnnest, nestSelection, unnestSelection, useNest } from '../nest'
 import { type SplitLayout, splitScreen } from '@shared/timeline/layout'
 import { clipTags, type ClipTag } from '@shared/timeline/tags'
 import { openMenu } from '../contextMenu'
+import { TEXT_MIME, clearGhost, dragPayload, useGhost } from '../dragGhost'
+import { TEXT_PRESETS } from '../textPresets'
 import type { Project } from '@shared/types'
 
 /** Height of one tag bar under a clip, and the most rows shown before a "+N" takes over. */
@@ -33,10 +35,27 @@ export function dropTargetAt(at: { x: number; y: number }): { trackId: string; t
 
 function Playhead({ zoom }: { zoom: number }) {
   const time = usePlayback((s) => s.time)
-  return <div className="playhead" style={{ transform: `translateX(${time * zoom}px)` }} />
+  // The grip at the top can be dragged: it follows the pointer along the timeline.
+  const drag = (e: React.PointerEvent<HTMLDivElement>): void => {
+    if (e.type === 'pointerdown') e.currentTarget.setPointerCapture(e.pointerId)
+    else if (!e.currentTarget.hasPointerCapture(e.pointerId)) return
+    const content = e.currentTarget.closest('.track-content') as HTMLElement
+    const x = e.clientX - content.getBoundingClientRect().left
+    const fps = useEditor.getState().project!.settings.fps
+    useEditor.getState().selectAsset(null)
+    player.pause()
+    player.seek(ops.snapToFrame(Math.max(0, x / zoom), fps))
+  }
+  return (
+    <div className="playhead" style={{ transform: `translateX(${time * zoom}px)` }}>
+      <div className="playhead-grip" role="slider" aria-label="Playhead" aria-valuenow={Math.round(time * 100) / 100} onPointerDown={drag} onPointerMove={drag} title="Drag to move the playhead" />
+    </div>
+  )
 }
 
 function Ruler({ zoom, duration, marks }: { zoom: number; duration: number; marks: { beats: number[]; snares: number[] } }) {
+  const rangeIn = useUi((u) => u.rangeIn)
+  const rangeOut = useUi((u) => u.rangeOut)
   // Pick a tick spacing that keeps labels roughly 80 px apart.
   const steps = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
   const step = steps.find((s) => s * zoom >= 80) ?? 600
@@ -62,6 +81,9 @@ function Ruler({ zoom, duration, marks }: { zoom: number; duration: number; mark
   return (
     <div className="ruler" onPointerDown={scrub} onPointerMove={scrub}>
       {ticks}
+      {rangeIn !== null && rangeOut !== null && <span className="range-region" style={{ left: rangeIn * zoom, width: Math.max(1, (rangeOut - rangeIn) * zoom) }} title={`Selected region: ${rangeIn.toFixed(2)} s to ${rangeOut.toFixed(2)} s`} />}
+      {rangeIn !== null && <span className="range-flag in" style={{ left: rangeIn * zoom }} title="In mark (I)">I</span>}
+      {rangeOut !== null && <span className="range-flag out" style={{ left: rangeOut * zoom }} title="Out mark (O)">O</span>}
       {marks.beats.map((t) => <span key={`b${t}`} className="mark beat" style={{ left: t * zoom }} />)}
       {marks.snares.map((t) => <span key={`s${t}`} className="mark snare" style={{ left: t * zoom }} title="Snare" />)}
     </div>
@@ -290,6 +312,8 @@ function TrackHeader({ track, index, count, shownHeight }: { track: Track; index
 export function Timeline() {
   const keyOverrides = useKeys((s) => s.overrides)
   const nest = useNest()
+  const rangeIn = useUi((u) => u.rangeIn)
+  const rangeOut = useUi((u) => u.rangeOut)
   const hasSel = useEditor((s) => s.selection.length > 0)
   const unnestable = useEditor((s) => canUnnest())
   const tracks = useEditor((s) => s.project!.tracks)
@@ -338,6 +362,14 @@ export function Timeline() {
 
   const contentWidth = Math.max(duration + 30, 60) * zoom
 
+  const ghost = useGhost()
+  /** Moves the playhead to where the pointer is (used when clicking or dragging on empty timeline space). */
+  const seekTo = (clientX: number): void => {
+    useEditor.getState().selectAsset(null)
+    player.pause()
+    player.seek(ops.snapToFrame(timeAt(clientX), useEditor.getState().project!.settings.fps))
+  }
+
   const timeAt = (clientX: number): number => {
     const el = scrollRef.current!
     return Math.max(0, (clientX - el.getBoundingClientRect().left + el.scrollLeft) / zoom)
@@ -346,8 +378,23 @@ export function Timeline() {
   const onDrop = (e: React.DragEvent, track: Track) => {
     e.preventDefault()
     setDropTrack(null)
+    clearGhost()
+    const at = ops.snapToFrame(timeAt(e.clientX), useEditor.getState().project!.settings.fps)
     const assetId = e.dataTransfer.getData(ASSET_MIME)
-    if (assetId) editor.insertAsset(assetId, track.id, ops.snapToFrame(timeAt(e.clientX), useEditor.getState().project!.settings.fps))
+    if (assetId) editor.insertAsset(assetId, track.id, at)
+    const preset = TEXT_PRESETS.find((p) => p.name === e.dataTransfer.getData(TEXT_MIME))
+    if (preset) {
+      const clip = textClip(at, preset.text)
+      if (preset.name === 'Lower third') clip.transform = { ...clip.transform, x: -0.22, y: 0.32 }
+      // Text goes on this lane when it is a text lane with room, otherwise on a text track (a new one if needed).
+      const target = track.kind === 'text' && !track.locked && ops.freeStart(track, at, clip.duration) === at ? track : tracks.find((x) => x.kind === 'text' && !x.locked && ops.freeStart(x, at, clip.duration) === at)
+      editor.apply(`Add ${preset.name} text`, (p) => {
+        const withTrack = target ? p : ops.addTrack(p, 'text')
+        return ops.addClip(withTrack, (target ?? withTrack.tracks[0]).id, clip)
+      })
+      editor.select([clip.id])
+      setTextEditor(true)
+    }
   }
 
   const addText = () => {
@@ -382,6 +429,9 @@ export function Timeline() {
         <button disabled={nest.busy || !hasSel} onClick={() => void nestSelection()} title={withKey('Nest the selected clips into one', 'nest', keyOverrides)}>Nest</button>
         <button disabled={nest.busy || !unnestable} onClick={unnestSelection} title={withKey('Unnest (put the original clips back)', 'unnest', keyOverrides)}>Unnest</button>
         {nest.note && <span className="nest-note" role="status" title={nest.note}>{nest.note}</span>}
+        <button onClick={() => markIn(player.time)} title={withKey('Set the in mark: start of the part that is exported', 'markIn', keyOverrides)} aria-label="Set in mark">[ In</button>
+        <button onClick={() => markOut(player.time)} title={withKey('Set the out mark: end of the part that is exported', 'markOut', keyOverrides)} aria-label="Set out mark">Out ]</button>
+        {(rangeIn !== null || rangeOut !== null) && <button onClick={clearRange} title={withKey('Clear the in and out marks', 'clearRange', keyOverrides)} aria-label="Clear region">✕ Region</button>}
         <button className="with-icon" onClick={editor.splitAtPlayhead} title={withKey('Split at playhead', 'split', keyOverrides)}><Icon name="scissors" /> Split</button>
         <button className="with-icon" onClick={editor.deleteSelection} disabled={!hasSelection} title="Delete (Del)"><Icon name="trash" /> Delete</button>
         <span className="sep" />
@@ -444,26 +494,36 @@ export function Timeline() {
           }}
         >
           <div className="track-content" style={{ width: contentWidth }}>
-            <Ruler zoom={zoom} duration={Math.max(duration + 30, 60)} marks={marks} />
+            <Ruler zoom={zoom} duration={Math.max(duration + 30, 60)} marks={{ beats: snapping && snapMarks.beats ? marks.beats : [], snares: snapping && snapMarks.snares ? marks.snares : [] }} />
             {tracks.map((t) => (
               <div key={t.id} className="lane-group">
               <div
                 className={`lane lane-${t.kind} ${t.locked ? 'locked' : ''} ${dropTrack === t.id ? 'drop' : ''}`}
                 style={{ height: shown(t) }}
                 data-track-id={t.id}
-                onPointerDown={() => editor.select([])}
+                onPointerDown={(e) => {
+                  // Empty space: deselect, move the playhead there, and keep following the pointer while it is held down.
+                  if (e.target !== e.currentTarget || e.button !== 0) return
+                  editor.select([])
+                  e.currentTarget.setPointerCapture(e.pointerId)
+                  seekTo(e.clientX)
+                }}
+                onPointerMove={(e) => { if (e.currentTarget.hasPointerCapture(e.pointerId)) seekTo(e.clientX) }}
                 onDragOver={(e) => {
-                  if (e.dataTransfer.types.includes(ASSET_MIME)) {
+                  const types = e.dataTransfer.types
+                  if (types.includes(ASSET_MIME) || types.includes(TEXT_MIME)) {
                     e.preventDefault()
                     setDropTrack(t.id)
+                    useGhost.setState({ trackId: t.id, time: ops.snapToFrame(timeAt(e.clientX), useEditor.getState().project!.settings.fps), duration: dragPayload.duration, label: dragPayload.label })
                   }
                 }}
-                onDragLeave={() => setDropTrack(null)}
+                onDragLeave={() => { setDropTrack(null); clearGhost() }}
                 onDrop={(e) => onDrop(e, t)}
               >
                 {t.clips.map((c) => (
                   <ClipView key={c.id} clip={c} track={{ ...t, height: shown(t) }} zoom={zoom} />
                 ))}
+                {ghost.trackId === t.id && <div className="drop-ghost" style={{ left: ghost.time * zoom, width: Math.max(24, ghost.duration * zoom) }}><span>{ghost.label}</span></div>}
               </div>
               {tagRows(t) > 0 && (
                 <div className="fx-lane" style={{ height: tagRows(t) * TAG_H }} aria-label={`Effects under the clips of ${t.name}`}>

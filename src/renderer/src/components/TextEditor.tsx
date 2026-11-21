@@ -47,7 +47,7 @@ export function TextEditor() {
           {customFonts.length > 0 && <optgroup label="Your fonts">{customFonts.map((f) => <option key={f}>{f}</option>)}</optgroup>}
           {FONT_CATEGORIES.map((c) => <optgroup key={c.name} label={c.name}>{c.fonts.map((f) => <option key={f}>{f}</option>)}</optgroup>)}
         </select>
-        <input type="number" aria-label="Size" min={0.01} max={0.5} step={0.005} value={Math.round(t.fontSize * 1000) / 1000} onChange={(e) => set({ fontSize: Math.min(0.5, Math.max(0.01, Number(e.target.value) || t.fontSize)) })} title="Size (fraction of the picture height)" />
+        <input type="number" aria-label="Font size" min={8} max={540} step={1} value={Math.round(t.fontSize * 1080)} onChange={(e) => set({ fontSize: Math.min(0.5, Math.max(0.008, (Number(e.target.value) || t.fontSize * 1080) / 1080)) })} title="Font size in points (for a 1080-pixel-high picture; it scales with the project size)" />
         <input type="color" aria-label="Text colour" value={t.color.length === 7 ? t.color : '#ffffff'} onChange={(e) => set({ color: e.target.value })} />
       </div>
       <div className="te-row">
@@ -61,6 +61,12 @@ export function TextEditor() {
       <div className="te-looks" role="group" aria-label="Looks">
         {LOOK_BUTTONS.map((l) => <button key={l} onClick={() => set({ ...TEXT_LOOKS[l].look, content: t.content, fontSize: t.fontSize }, 'text-look')} title={`Give the text the ${TEXT_LOOKS[l].name} look`}>{TEXT_LOOKS[l].name}</button>)}
       </div>
+      {!isCaption && t.animation === 'typewriter' && (
+        <div className="te-row" role="group" aria-label="Typed out">
+          <label className="te-inline">Typing time <input type="number" aria-label="Typing time" min={0.2} max={60} step={0.1} value={t.typeSeconds ?? Math.round(Math.max(0.2, [...t.content].length / 26) * 10) / 10} onChange={(e) => set({ typeSeconds: Math.min(60, Math.max(0.2, Number(e.target.value) || 1)) })} title="Seconds the whole text takes to type out" /> s</label>
+          <label className="te-inline"><input type="checkbox" aria-label="Blinking cursor" checked={t.typeCursor !== false} onChange={(e) => set({ typeCursor: e.target.checked })} /> Blinking cursor</label>
+        </div>
+      )}
       {!isCaption && (
         <div className="te-row">
           <label className="te-inline">In <select aria-label="Animation in" value={t.animation} onChange={(e) => set({ animation: e.target.value })}>{TEXT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}</select></label>

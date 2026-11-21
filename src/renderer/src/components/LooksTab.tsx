@@ -10,7 +10,7 @@ import { player } from '../engine/player'
 const SAMPLES: [number, number, number][] = [[0.9, 0.7, 0.58], [0.4, 0.6, 0.92], [0.3, 0.6, 0.3], [0.5, 0.5, 0.5], [0.12, 0.12, 0.18], [0.95, 0.95, 0.9]]
 const css = ([r, g, b]: [number, number, number]): string => `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`
 
-const LOOK_CATEGORIES: LookCategory[] = ['Cinematic', 'Film', 'Black and white', 'Social', 'Dark and moody']
+const LOOK_CATEGORIES: LookCategory[] = ['Cinematic', 'Film', 'Film stocks', 'Vintage', 'Black and white', 'Warm and cool', 'Social', 'Music video', 'Dark and moody', 'Creative']
 const OVERLAY_CATEGORIES: OverlayCategory[] = ['Light leaks', 'Film', 'Flashes', 'Digital']
 
 /** Colour looks (lookup tables made from formulas) and overlay clips (light leaks, grain, dust, flashes), both free of licences. */

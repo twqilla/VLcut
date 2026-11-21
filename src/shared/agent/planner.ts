@@ -14,7 +14,7 @@ import { insertTemplate, templateById } from '../motionTemplates'
 import { lookById } from '../color/looks'
 import * as batch from './batch'
 import { AUDIO_EFFECTS, audioEffectSpec } from '../effects/audio'
-import { BUILTIN_STYLES, type StyleDef, findStyle, withIntensity } from '../styles/styles'
+import { BUILTIN_STYLES, type StyleDef, findStyle, gradeOnly, withIntensity } from '../styles/styles'
 import { projectDuration } from '../timeline/ops'
 import * as tools from './tools'
 import { musicMarks } from '../timeline/marks'
@@ -319,10 +319,12 @@ export function runStep(project: Project, step: PlanStep, context: AgentContext 
       return done(r.project, r.cuts ? `Removed ${r.cuts} pause${r.cuts === 1 ? '' : 's'}, ${r.removed.toFixed(1)} s in total.` : 'Found no pauses long enough to cut.')
     }
     case 'applyStyle': {
-      const style = findStyle(String(step.args.styleId), context.customStyles)
-      if (!style) return done(project, 'That style no longer exists.')
+      const found = findStyle(String(step.args.styleId), context.customStyles)
+      if (!found) return done(project, 'That style no longer exists.')
+      const colourOnly = step.args.colourOnly === 1
+      const style = colourOnly ? gradeOnly(found) : found
       const intensity = typeof step.args.intensity === 'number' ? step.args.intensity : 1
-      return done(tools.applyStyle(project, withIntensity(style, intensity), context), `Applied ${style.name}: look layer, camera movement, transitions, typography and sound.`)
+      return done(tools.applyStyle(project, withIntensity(style, intensity), context), colourOnly ? `Applied the ${style.name} colour style.` : `Applied ${style.name}: look layer, camera movement, transitions, typography and sound.`)
     }
     case 'removeStyle':
       return done(tools.stripStyle(project), 'Removed the style.')

@@ -80,3 +80,4 @@ Ctrl+C / V / D · Ctrl+A · +/− zoom (or Ctrl+wheel) · Ctrl+S save.
 - **Privacy:** `docs/PRIVACY.md`. Nothing is collected; a few optional downloads use the internet.
 - **Your content:** you are responsible for the rights to the videos, photos, music, voices and fonts you use, and for the rules of the sites you post to.
   The app contains and downloads no copyrighted music. Regenerate the notices with `node scripts/gen-notices.mjs` after changing dependencies.
+- **Names:** VLcut is an independent project. It is not related to VLC or VideoLAN, and film-style look names in the app are generic descriptions, not products of the companies that make film.

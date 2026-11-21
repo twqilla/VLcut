@@ -776,3 +776,58 @@ button.big { font-size: 16px; padding: 14px 28px; border-radius: 12px; box-shado
 .tip { padding: 12px 16px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--panel) 70%, transparent); border-radius: 0 10px 10px 0; animation: tip-in .5s ease }
 .tip strong { color: var(--accent-hi); margin-right: 8px }
 @keyframes tip-in { from { opacity: 0; transform: translateY(6px) } }
+
+/* Interpolini studio: its own look (graphite and amber), different from the editor */
+.studio-backdrop { background: rgba(4, 4, 6, .82) }
+.studio { width: min(1100px, 94vw); max-height: 92vh; display: flex; flex-direction: column; background: #16161a; color: #ececf0; border: 1px solid #ff9d2e; border-radius: 6px; box-shadow: 0 0 0 1px #000, 0 30px 80px rgba(0,0,0,.7); --accent: #ff9d2e; --accent-hi: #ffc46b; --on-accent: #1a1100; --panel: #1d1d22; --line: #34343c; --text: #ececf0; --muted: #9a9aa6 }
+.studio header { display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: linear-gradient(180deg, #25252b, #1b1b20); border-bottom: 2px solid #ff9d2e }
+.studio header h2 { margin: 0; font-size: 18px; letter-spacing: .06em; text-transform: uppercase }
+.studio-mark { color: #ff9d2e }
+.studio-sub { color: var(--muted) }
+.studio-body { display: grid; grid-template-columns: 300px 1fr; gap: 0; overflow: hidden; min-height: 0 }
+.studio-side { padding: 16px; border-right: 1px solid var(--line); background: #131316; display: flex; flex-direction: column; gap: 10px; overflow-y: auto }
+.studio-side h3 { margin: 6px 0 0; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #ff9d2e }
+.studio-side select { width: 100% }
+.studio-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px }
+.studio-new { display: flex; gap: 6px }
+.studio-new input { flex: 1; min-width: 0 }
+.studio-main { padding: 16px 20px; overflow-y: auto }
+.studio button.primary { background: #ff9d2e; color: #1a1100; border-color: #ff9d2e }
+
+/* Timeline: a faint copy of the dragged clip where it would land, and a grip to drag the playhead */
+.drop-ghost { position: absolute; top: 3px; bottom: 3px; border: 2px dashed var(--accent); background: color-mix(in srgb, var(--accent) 22%, transparent); border-radius: 4px; pointer-events: none; z-index: 4; overflow: hidden; display: flex; align-items: center; padding: 0 6px; font-size: 11px }
+.playhead-grip { position: absolute; top: -2px; left: -9px; width: 19px; height: 22px; cursor: ew-resize; pointer-events: auto; z-index: 7 }
+.playhead::before { border-width: 9px; left: -9px; border-top-width: 13px }
+.timeline-toolbar button, .timeline-toolbar select { min-height: 32px; font-size: 13px }
+.timeline-toolbar .icon-btn { min-width: 36px }
+.drop-overlay { background: transparent !important; border: 3px dashed var(--accent) }
+.drop-overlay strong, .drop-overlay span { display: none }
+.home .drop-overlay { background: rgba(8, 12, 24, .72) !important }
+.home .drop-overlay strong, .home .drop-overlay span { display: inline }
+.topbar { flex-wrap: wrap; row-gap: 6px }
+.sidebar .tabs { flex-wrap: wrap; overflow: visible }
+
+.range-region { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 30%, transparent); border-left: 2px solid var(--accent-hi); border-right: 2px solid var(--accent-hi); pointer-events: none }
+.range-flag { position: absolute; top: 0; width: 16px; height: 16px; line-height: 16px; text-align: center; font-size: 11px; font-weight: 700; background: var(--accent); color: var(--on-accent, #000); pointer-events: none }
+.range-flag.in { margin-left: 0; border-radius: 0 0 4px 0 } .range-flag.out { margin-left: -16px; border-radius: 0 0 0 4px }
+
+/* History: a vertical list like the History panel in Paint.NET */
+.history-list { list-style: none; margin: 0 0 8px; padding: 0; max-height: 52vh; overflow-y: auto; border: 1px solid var(--line); background: var(--bg); outline: none }
+.history-list:focus-visible { border-color: var(--accent) }
+.history-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; cursor: default; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); user-select: none }
+.history-row:hover { background: color-mix(in srgb, var(--accent) 12%, transparent) }
+.history-row.current { background: var(--accent); color: var(--on-accent, #000); font-weight: 600 }
+.history-row.undone { opacity: .5; font-style: italic }
+.history-row.undone:hover { opacity: .85 }
+.history-num { min-width: 22px; text-align: right; opacity: .6; font-variant-numeric: tabular-nums }
+.history-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.history-panel { padding: 0 8px }
+
+/* Preview view: zoom and pan are separate from editing a clip's position. */
+.preview { overflow: hidden; }
+.view-layer { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; transform-origin: 50% 50%; pointer-events: none; }
+.view-layer canvas { pointer-events: auto; }
+.preview canvas.pannable { cursor: grab; }
+.view-tools { display: flex; align-items: center; gap: 2px; margin-right: 6px; }
+.view-tools .icon-btn[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.zoom-readout { min-width: 48px; font-size: 11px; padding: 3px 4px; }
