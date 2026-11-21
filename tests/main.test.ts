@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, expect, test } from 'vitest'
@@ -343,4 +343,14 @@ test('interpolini that crashes at start is retried without the graphics add-on l
     delete process.env.FAKE_INTERPOLINI_CRASH
     delete process.env.VLCUT_INTERPOLINI
   }
+})
+
+test('a missing library next to interpolini is found by name', async () => {
+  const { missingLibraries } = await import('../src/main/render/interpolini')
+  const folder = join(dir, 'interpolini-folder')
+  mkdirSync(folder, { recursive: true })
+  for (const n of ['interpolini-cli.exe', 'avcodec-62.dll', 'avformat-62.dll', 'avutil-60.dll', 'swscale-9.dll', 'open_svpflow.dll', 'svpflow1_vs.dll', 'svpflow2_vs.dll', 'interpolini_rife.dll']) writeFileSync(join(folder, n), '')
+  expect(await missingLibraries(join(folder, 'interpolini-cli.exe'))).toEqual(['swresample-'])
+  writeFileSync(join(folder, 'swresample-6.dll'), '')
+  expect(await missingLibraries(join(folder, 'interpolini-cli.exe'))).toEqual([])
 })

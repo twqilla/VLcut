@@ -94,10 +94,23 @@ function attempt(path: string, env: NodeJS.ProcessEnv): Promise<Attempt> {
   )
 }
 
+/** The libraries interpolini needs next to its program (by name start). A missing one is the commonest reason it will not start. */
+const NEEDED_LIBRARIES = ['avcodec-', 'avformat-', 'avutil-', 'swresample-', 'swscale-', 'open_svpflow', 'svpflow1_vs', 'svpflow2_vs', 'interpolini_rife']
+
+export async function missingLibraries(exePath: string): Promise<string[]> {
+  const names = (await readdir(dirname(exePath)).catch(() => [])).map((n) => n.toLowerCase())
+  return NEEDED_LIBRARIES.filter((prefix) => !names.some((n) => n.startsWith(prefix) && n.endsWith('.dll')))
+}
+
 export async function interpoliniStatus(userDir: string): Promise<InterpoliniStatus> {
   const path = await findInterpolini(userDir)
   const canAutoInstall = process.platform === 'win32'
   if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
+  // Windows opens a message box and waits when a library is missing, so check the files first and say it plainly.
+  if (process.platform === 'win32') {
+    const missing = await missingLibraries(path)
+    if (missing.length) return { path, info: `It could not be started: ${missing.map((m) => `${m.replace(/-$/, '')}*.dll`).join(', ')} ${missing.length === 1 ? 'is' : 'are'} missing next to interpolini-cli.exe. Antivirus software often removes such files: check Windows Security → Protection history, restore them, then press “Install this version” to download a complete copy. Motion blur in the export (Frame blending with Vegas weighting) works without it.`, canAutoInstall }
+  }
   let first = await attempt(path, cleanEnv())
   if (first.ok) {
     layersOff = false
