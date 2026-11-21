@@ -292,7 +292,8 @@ test('every transition has its own behaviour, not the fade fallback', async () =
 })
 
 test('colour styles only grade: no shakes, pulses, zooms, transitions, sounds or type changes', () => {
-  expect(COLOUR_STYLES).toHaveLength(BUILTIN_STYLES.length)
+  expect(COLOUR_STYLES.length).toBeGreaterThanOrEqual(BUILTIN_STYLES.length + 20)
+  expect(new Set(COLOUR_STYLES.map((s) => s.name)).size).toBe(COLOUR_STYLES.length) // every style has its own name
   const banned = ['shake', 'zoomPulse', 'slowZoom', 'glitch', 'flicker', 'rgbSplit']
   for (const s of COLOUR_STYLES) {
     expect(s.look.some((e) => banned.includes(e.type)), s.id).toBe(false)
@@ -309,4 +310,14 @@ test('colour styles only grade: no shakes, pulses, zooms, transitions, sounds or
   expect(styled.tracks.find((t) => t.name === 'Captions')!.clips[0].text!.fontFamily).toBe(p.tracks.find((t) => t.name === 'Captions')!.clips[0].text!.fontFamily)
   p = tools.stripStyle(styled)
   expect(p.tracks.find((t) => t.name === 'Look')).toBeUndefined()
+})
+
+test('removing pauses never cuts through recognised speech, even where it is quiet', () => {
+  const p = project()
+  const quiet = { ...talk, analysis: { ...talk.analysis!, transcript: [...talk.analysis!.transcript!, { text: 'whispered', start: 4.6, end: 5.2 }] } }
+  const withQuiet = { ...p, media: p.media.map((m) => (m.id === 'talk' ? quiet : m)) }
+  const before = tools.silentRanges(p, { minSilence: 0.45, padding: 0.12 })
+  const after = tools.silentRanges(withQuiet, { minSilence: 0.45, padding: 0.12 })
+  expect(before.some((r) => r.start < 5 && r.end > 5)).toBe(true) // without the words, the 4 to 6 s pause is cut through the middle
+  expect(after.every((r) => !(r.start < 5.2 && r.end > 4.6))).toBe(true) // with them, nothing is cut inside 4.6 to 5.2 s
 })

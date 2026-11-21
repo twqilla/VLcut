@@ -46,10 +46,10 @@ export function InterpoliniPanel({ settings, onChange, exportFps, clipFps, blend
   return (
     <div className="interpolini" aria-label="interpolini settings">
       <div className="interpolini-status" role="status">
-        {status === null ? 'Looking for interpolini…' : status.path ? <>interpolini found · {status.info}</> : (
+        {status === null ? 'Looking for interpolini…' : status.path ? <>interpolini found · {status.info}{' '}<button onClick={() => void window.api.interpolini.choose().then(setStatus)} title="Use a different interpolini-cli.exe, for example the one from the official installer">Choose another…</button></> : (
           <>
             {status.info}{' '}
-            {status.canAutoInstall ? <button onClick={() => void install()} disabled={Boolean(progress)}>Download interpolini</button> : <span className="dim">Install it from github.com/Z1xus/interpolini and put interpolini-cli on your PATH.</span>}
+            <button onClick={() => void window.api.interpolini.choose().then(setStatus)} title="Pick interpolini-cli.exe from a copy you installed yourself">Choose interpolini-cli.exe…</button>{' '}{status.canAutoInstall ? <button onClick={() => void install()} disabled={Boolean(progress)}>Download interpolini</button> : <span className="dim">Install it from github.com/Z1xus/interpolini and put interpolini-cli on your PATH.</span>}
           </>
         )}
         {progress && <progress value={progress.fraction} max={1} aria-label={progress.label} />}

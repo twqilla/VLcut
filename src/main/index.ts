@@ -29,7 +29,7 @@ import { makeProxy } from './media/proxy'
 import { exportLossless } from './render/lossless'
 import { losslessPlan } from '@shared/render/lossless'
 import { IMPORT_FILTERS, VIDEO_EXTENSIONS as VIDEO_TYPES } from '@shared/mediaTypes'
-import { findInterpolini, installInterpolini, interpoliniStatus } from './render/interpolini'
+import { chooseInterpolini, findInterpolini, installInterpolini, interpoliniStatus } from './render/interpolini'
 import { cfgFileName } from '@shared/render/interpolini'
 import { blurRange } from './render/blurClip'
 import { registerMediaProtocol } from './media/protocol'
@@ -111,6 +111,10 @@ function registerIpc(store: ProjectStore): void {
     // Notepad on Windows; the system's text editor elsewhere.
     if (process.platform === 'win32') spawn('notepad.exe', [file], { detached: true, stdio: 'ignore' }).unref()
     else await shell.openPath(file)
+  })
+  ipcMain.handle('interpolini:choose', async (e) => {
+    const result = await dialog.showOpenDialog(BrowserWindow.fromWebContents(e.sender)!, { properties: ['openFile'], filters: [{ name: 'interpolini-cli', extensions: ['exe'] }] })
+    return result.canceled || !result.filePaths[0] ? interpoliniStatus(app.getPath('userData')) : chooseInterpolini(app.getPath('userData'), result.filePaths[0])
   })
   ipcMain.handle('interpolini:status', () => interpoliniStatus(app.getPath('userData')))
   ipcMain.handle('interpolini:install', (e) => installInterpolini(app.getPath('userData'), (label, fraction) => e.sender.send('interpolini:progress', { label, fraction })))

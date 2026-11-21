@@ -160,7 +160,7 @@ export const BUILTIN_STYLES: StyleDef[] = [
 ]
 
 export function findStyle(id: string, custom: StyleDef[] = []): StyleDef | undefined {
-  return [...custom, ...BUILTIN_STYLES].find((s) => s.id === id)
+  return [...custom, ...BUILTIN_STYLES, ...EXTRA_COLOUR_STYLES].find((s) => s.id === id)
 }
 
 /** Scales how strongly a style's look and movement are applied (1 = as designed). */
@@ -170,28 +170,24 @@ export function withIntensity(style: StyleDef, intensity: number): StyleDef {
   return { ...style, look: scale(style.look), clipEffects: scale(style.clipEffects) }
 }
 
-/** What each colour style looks like, in words about colour only. */
-const COLOUR_WORDS: Record<string, [string, string]> = {
-  cinematic: ['Teal and amber', 'Teal shadows, amber highlights, lifted blacks and a soft vignette.'],
-  editorial: ['Clean neutral', 'Neutral colour with gentle contrast and a touch of fade.'],
-  hype: ['Punchy', 'Strong contrast and saturation with a warm cast.'],
-  analog: ['Warm film', 'Faded warm film stock with grain and a soft glow.'],
-  luxury: ['Deep and polished', 'Deep blacks, soft highlights and a champagne cast.'],
-  glitch: ['Cold digital', 'Cold, slightly desaturated digital grade with a light grain.'],
-  'studio-warm': ['Olive and cream', 'Warm olive-brown grade with creamy highlights.'],
-  'neon-product': ['Neon black', 'Crushed blacks with a green-tinted glow.'],
-  kinetic: ['Hot orange', 'Hot orange grade with strong contrast.'],
-  explainer: ['Bright and clean', 'Bright, clean colour with a little extra saturation.']
+/** Names that say what the grade does to the picture, by the style it comes from. */
+const COLOUR_NAMES: Record<string, string> = {
+  cinematic: 'Teal and amber with bars', editorial: 'Neutral soft contrast', hype: 'Punchy contrast and saturation', analog: 'Warm faded grain',
+  luxury: 'Soft glow, low saturation', glitch: 'Cool grain', 'studio-warm': 'Warm olive tones', 'neon-product': 'Dark green glow',
+  kinetic: 'Hot warm saturated', explainer: 'Bright and clean'
 }
+const PARTS: Record<string, string> = { color: 'colour', duotone: 'tint', vignette: 'vignette', grain: 'grain', glow: 'glow', letterbox: 'bars' }
 
-/** The same grades as colour-only styles: nothing that moves, shakes, pulses or cuts. */
+/** The same grades as colour-only styles: nothing that moves, shakes, pulses or cuts. The name and the one-line summary come from what the grade really contains. */
 export function gradeOnly(style: StyleDef): StyleDef {
-  const words = COLOUR_WORDS[style.id]
+  const look = style.look.filter((e) => !['glitch', 'flicker', 'rgbSplit', 'shake', 'zoomPulse', 'slowZoom'].includes(e.type))
+  const parts = [...new Set(look.map((e) => PARTS[e.type] ?? e.type))]
   return {
     ...style,
-    tagline: words?.[0] ?? style.tagline,
-    description: words?.[1] ?? 'A colour grade.',
-    look: style.look.filter((e) => !['glitch', 'flicker', 'rgbSplit', 'shake', 'zoomPulse', 'slowZoom'].includes(e.type)),
+    name: style.builtin ? COLOUR_NAMES[style.id] ?? style.name : style.name,
+    tagline: parts.join(' · '),
+    description: `Colour grade: ${parts.join(', ')}.`,
+    look,
     clipEffects: [], alternate: undefined,
     transitions: { types: [], duration: 0 }, transitionSfx: '', sfxVolume: 0,
     pacing: { shotLength: style.pacing.shotLength, beatSync: false, beatsPerShot: style.pacing.beatsPerShot },
@@ -200,4 +196,39 @@ export function gradeOnly(style: StyleDef): StyleDef {
   }
 }
 
-export const COLOUR_STYLES: StyleDef[] = BUILTIN_STYLES.map(gradeOnly)
+
+const c = (o: Partial<Record<'exposure' | 'contrast' | 'saturation' | 'temperature' | 'tint' | 'fade' | 'hue', number>>): StyleEffect => fx('color', { exposure: 0, contrast: 0, saturation: 0, temperature: 0, tint: 0, fade: 0, hue: 0, ...o })
+const grade = (id: string, name: string, look: StyleEffect[]): StyleDef => ({
+  id: `colour-${id}`, name, tagline: '', description: '', builtin: true, look, clipEffects: [], transitions: { types: [], duration: 0 }, transitionSfx: '', sfxVolume: 0,
+  pacing: { shotLength: 3, beatSync: false, beatsPerShot: 4 }, title: {}, caption: {}, captionY: 0.3, audio: { fadeIn: 0, fadeOut: 0, duckMusic: false }, gradeOnly: true
+})
+const vig = (amount: number): StyleEffect => fx('vignette', { amount, size: 0.5 })
+const grn = (amount: number, size = 1.3): StyleEffect => fx('grain', { amount, size })
+const duo = (shadowHue: number, highlightHue: number, amount: number): StyleEffect => fx('duotone', { shadowHue, highlightHue, amount })
+const glw = (amount: number, radius: number): StyleEffect => fx('glow', { amount, radius })
+
+/** More colour styles, each named for what it does to the picture. */
+export const EXTRA_COLOUR_STYLES: StyleDef[] = [
+  grade('cool-contrast', 'Cool blue, high contrast', [c({ contrast: 0.2, temperature: -0.2, saturation: -0.05 }), vig(0.35)]),
+  grade('golden-glow', 'Warm golden glow', [c({ temperature: 0.25, saturation: 0.1, exposure: 0.03 }), glw(0.2, 24)]),
+  grade('bw-contrast', 'Black and white, high contrast', [c({ saturation: -1, contrast: 0.3 })]),
+  grade('bw-grain', 'Black and white, soft grain', [c({ saturation: -1, contrast: 0.05, fade: 0.06 }), grn(0.3)]),
+  grade('sepia', 'Sepia with vignette', [c({ saturation: -0.5, temperature: 0.35, fade: 0.1 }), vig(0.4)]),
+  grade('matte', 'Faded matte', [c({ fade: 0.2, contrast: -0.1, saturation: -0.15 })]),
+  grade('vivid', 'Vivid saturated', [c({ saturation: 0.45, contrast: 0.15 })]),
+  grade('muted', 'Muted, low saturation', [c({ saturation: -0.45, contrast: 0.1 })]),
+  grade('magenta-cyan', 'Magenta shadows, cyan highlights', [c({ contrast: 0.12 }), duo(300, 180, 0.35)]),
+  grade('purple-gold', 'Purple shadows, gold highlights', [c({ contrast: 0.12 }), duo(275, 45, 0.3)]),
+  grade('blue-orange', 'Blue shadows, orange highlights', [c({ contrast: 0.12 }), duo(220, 30, 0.4)]),
+  grade('green-dark', 'Dark green tint', [c({ tint: -0.2, exposure: -0.1, contrast: 0.2 })]),
+  grade('red-dark', 'Dark warm red', [c({ temperature: 0.2, exposure: -0.1, contrast: 0.25 }), vig(0.5)]),
+  grade('heavy-vignette', 'Dark heavy vignette', [c({ exposure: -0.1 }), vig(0.7)]),
+  grade('high-key', 'Bright high-key', [c({ exposure: 0.2, contrast: -0.1, saturation: -0.1 })]),
+  grade('heavy-grain', 'Heavy film grain', [c({ fade: 0.08 }), grn(0.6, 1.6)]),
+  grade('dreamy-glow', 'Soft dreamy glow', [c({ fade: 0.1, exposure: 0.05 }), glw(0.45, 36)]),
+  grade('pink-teal', 'Pink and teal', [c({ contrast: 0.1 }), duo(340, 180, 0.35)]),
+  grade('sunset', 'Sunset orange', [c({ temperature: 0.35, tint: 0.08, saturation: 0.2 })]),
+  grade('moonlight', 'Moonlight blue', [c({ exposure: -0.12, temperature: -0.3, saturation: -0.2 }), vig(0.4)])
+].map(gradeOnly)
+
+export const COLOUR_STYLES: StyleDef[] = [...BUILTIN_STYLES.map(gradeOnly), ...EXTRA_COLOUR_STYLES]

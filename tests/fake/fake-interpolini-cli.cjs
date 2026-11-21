@@ -10,7 +10,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const args = process.argv.slice(2)
-if (args.includes('--version')) { console.log('interpolini 0.0.0 (test stand-in)'); process.exit(0) }
+if (args.includes('--version') || args.includes('--help')) { console.log('interpolini 0.0.0 (test stand-in)'); process.exit(0) }
 if (process.env.FAKE_INTERPOLINI_LOG) fs.appendFileSync(process.env.FAKE_INTERPOLINI_LOG, JSON.stringify(args) + '\n')
 
 const settings = {}

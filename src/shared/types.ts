@@ -465,6 +465,8 @@ export interface ExportSettings {
   /** Constant quality (CRF): lower is better and larger. Ignored when `videoBitrateKbps` is set. */
   crf: number
   videoBitrateKbps?: number
+  /** The encoder arguments as shown (and possibly edited) in the export dialog. When set, this is what FFmpeg gets. */
+  videoCommand?: string
   audioBitrateKbps: number
   normalizeAudio: boolean
   motionBlur: MotionBlurSettings
@@ -564,6 +566,7 @@ export interface Api {
     status(): Promise<InterpoliniStatus>
     /** Downloads interpolini (Windows). Needs internet once. */
     install(): Promise<InterpoliniStatus>
+    choose(): Promise<InterpoliniStatus>
     onProgress(listener: (p: { label: string; fraction: number }) => void): () => void
   }
   speech: {

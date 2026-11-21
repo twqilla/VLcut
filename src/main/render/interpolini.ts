@@ -5,7 +5,7 @@
  */
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readdir, rename, rm } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -30,11 +30,25 @@ async function findIn(dir: string, depth: number): Promise<string | null> {
 }
 
 /** Looks, in order, at VLCUT_INTERPOLINI, the app's own folder for it, the install folder and the PATH. */
+const CHOSEN = 'interpolini-path.txt'
+/** Remembers a copy of interpolini-cli the person picked by hand (for example from the official installer). */
+export async function chooseInterpolini(userDir: string, file: string): Promise<InterpoliniStatus> {
+  await writeFile(join(userDir, CHOSEN), file, 'utf8')
+  return interpoliniStatus(userDir)
+}
+
 export async function findInterpolini(userDir: string): Promise<string | null> {
   const override = process.env.VLCUT_INTERPOLINI
   if (override && existsSync(override)) return override
+  const chosen = (await readFile(join(userDir, CHOSEN), 'utf8').catch(() => '')).trim()
+  if (chosen && existsSync(chosen)) return chosen
   for (const dir of [join(userDir, 'interpolini'), join(process.resourcesPath ?? '', 'interpolini')]) {
     const found = await findIn(dir, 2)
+    if (found) return found
+  }
+  for (const base of [process.env.LOCALAPPDATA && join(process.env.LOCALAPPDATA, 'Programs'), process.env.ProgramFiles, process.env['ProgramFiles(x86)']]) {
+    if (!base) continue
+    const found = await findIn(join(base, 'interpolini'), 1)
     if (found) return found
   }
   for (const dir of (process.env.PATH ?? '').split(delimiter)) if (dir && existsSync(join(dir, exe))) return join(dir, exe)
@@ -46,14 +60,15 @@ export async function interpoliniStatus(userDir: string): Promise<InterpoliniSta
   const canAutoInstall = process.platform === 'win32'
   if (!path) return { path: null, info: 'interpolini is not installed.', canAutoInstall }
   const info = await new Promise<string>((resolve) =>
-    execFile(path, ['--version'], { timeout: 20000 }, (err, stdout, stderr) => {
+    // --help is the documented flag; the program runs from its own folder so it finds its libraries and models.
+    execFile(path, ['--help'], { timeout: 20000, cwd: dirname(path), windowsHide: true }, (err, stdout, stderr) => {
       const text = `${stdout}\n${stderr}`.trim()
       if (!err) return resolve(text.split('\n')[0].trim() || 'ready')
       // Some builds have no --version: if the program ran and printed its usage, it works.
       if (typeof (err as { code?: unknown }).code === 'number' && /interpolini|usage|options/i.test(text)) return resolve(text.split('\n')[0].trim().slice(0, 120))
       const code = (err as { code?: unknown }).code
       const why = typeof code === 'number' ? explainExit(code, null) : (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'The file is missing. Download interpolini again.' : String((err as { killed?: boolean }).killed ? 'It did not answer in time.' : err.message.split('\n')[0]).slice(0, 200)
-      resolve(`It could not be started. ${why}${text ? ` Its own message: ${text.slice(0, 160)}` : ''}`)
+      resolve(`It could not be started. ${why} Motion blur in the export (Frame blending with Vegas weighting) works without it.${text ? ` Its own message: ${text.slice(0, 160)}` : ''}`)
     })
   )
   return { path, info, canAutoInstall }

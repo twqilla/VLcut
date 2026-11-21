@@ -5,6 +5,7 @@
  * app closing) picks up from the last finished part next time. When every part
  * exists they are joined and the sound is mixed in.
  */
+import { checkCommand, generatedVideoArgs } from '@shared/render/videoCommand'
 import { BrowserWindow, type WebContents } from 'electron'
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
@@ -50,16 +51,14 @@ const jobs = new Map<string, Job>()
 
 const partFile = (job: Job, part: number): string => join(job.partsDir, `part-${String(part).padStart(5, '0')}.mkv`)
 
+/** The encoder arguments: the command the person edited in the export dialog, or what the settings stand for. */
 export function videoArgs(s: ExportSettings): string[] {
-  const gpu = s.encoder === 'nvenc'
-  const video = s.codec === 'h265' ? ['-c:v', gpu ? 'hevc_nvenc' : 'libx265', '-tag:v', 'hvc1'] : ['-c:v', gpu ? 'h264_nvenc' : 'libx264', '-profile:v', 'high']
-  const kbps = s.videoBitrateKbps ? Math.max(100, Math.min(400000, Math.round(s.videoBitrateKbps))) : 0
-  const rate = kbps
-    ? ['-b:v', `${kbps}k`, '-maxrate', `${Math.round(kbps * 1.5)}k`, '-bufsize', `${kbps * 2}k`, ...(gpu ? ['-rc', 'vbr'] : [])]
-    : gpu ? ['-rc', 'vbr', '-cq', String(s.crf), '-b:v', '0'] : ['-crf', String(s.crf)]
-  // NVENC has its own preset names (p1 fastest, p7 best); p5 is a good balance for finished files.
-  const preset = gpu ? ['-preset', 'p5', '-tune', 'hq'] : ['-preset', 'fast']
-  return [...video, ...rate, ...preset, '-pix_fmt', 'yuv420p', '-r', String(s.fps)]
+  if (s.videoCommand?.trim()) {
+    const checked = checkCommand(s.videoCommand)
+    if (!checked.ok) throw new Error(`The encoder command cannot be used: ${checked.error}`)
+    return checked.args
+  }
+  return generatedVideoArgs(s)
 }
 
 /** Arguments that encode one part from raw frames on stdin. */
@@ -74,7 +73,7 @@ export function joinArgs(project: Project, s: ExportSettings, listFile: string, 
   return [
     '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', listFile,
     ...(audio ? [...audio.inputArgs, '-filter_complex', audio.filter, '-map', '0:v', '-map', audio.output, '-c:a', 'aac', '-b:a', `${s.audioBitrateKbps}k`] : ['-map', '0:v']),
-    '-c:v', 'copy', ...(s.codec === 'h265' ? ['-tag:v', 'hvc1'] : []), '-movflags', '+faststart', '-f', mov ? 'mov' : 'mp4', out
+    '-c:v', 'copy', ...(s.codec === 'h265' || /hevc|265/.test(s.videoCommand ?? '') ? ['-tag:v', 'hvc1'] : []), '-movflags', '+faststart', '-f', mov ? 'mov' : 'mp4', out
   ]
 }
 

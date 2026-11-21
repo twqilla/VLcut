@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ExportProgress, ExportSettings } from '@shared/types'
 import { projectDuration } from '@shared/timeline/ops'
 import { sliceProject } from '@shared/timeline/range'
@@ -10,6 +10,7 @@ import { Num, Row } from './fields'
 import { InterpoliniPanel } from './InterpoliniPanel'
 import { loadBlurSettings } from '../blur'
 import { vegasWindow } from '@shared/render/vegasBlend'
+import { checkCommand, classify, formatCommand, generatedVideoArgs, mergeCommand } from '@shared/render/videoCommand'
 import { EXPORT_PRESETS, applyPreset, presetFileName, shapeMismatch } from '@shared/render/presets'
 
 const HEIGHTS = [720, 1080, 1440, 2160]
@@ -46,6 +47,16 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
     pixelScaling: Boolean(project.settings.pixelScaling)
   })
   const [useBitrate, setUseBitrate] = useState(false)
+  /** The encoder command: written by the settings, editable by hand; the settings only update the parts the person has not changed. */
+  const generated = useMemo(() => generatedVideoArgs({ ...settings, videoBitrateKbps: useBitrate ? settings.videoBitrateKbps ?? 12000 : undefined }), [settings, useBitrate])
+  const [command, setCommand] = useState('')
+  const lastGenerated = useRef<string[]>([])
+  useEffect(() => {
+    setCommand((cur) => mergeCommand(cur, lastGenerated.current, generated))
+    lastGenerated.current = generated
+  }, [generated])
+  const commandCheck = useMemo(() => checkCommand(command), [command])
+  const commandParts = useMemo(() => classify(command, generated), [command, generated])
   const [encoders, setEncoders] = useState<Record<string, { ok: boolean; reason: string }> | null>(null)
   useEffect(() => void window.api.exporter.encoders().then(setEncoders).catch(() => undefined), [])
   /** The fastest frame rate among the footage in the project (what a Vegas-style resample blends down from). */
@@ -94,7 +105,11 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
       }
       return
     }
-    const final = { ...settings, outputPath, videoBitrateKbps: useBitrate ? settings.videoBitrateKbps ?? 12000 : undefined }
+    if (!commandCheck.ok) {
+      setProgress({ jobId: '', state: 'error', frame: 0, totalFrames: 0, elapsedMs: 0, message: `The encoder command cannot be used: ${commandCheck.error}`, outputPath })
+      return
+    }
+    const final = { ...settings, outputPath, videoBitrateKbps: useBitrate ? settings.videoBitrateKbps ?? 12000 : undefined, videoCommand: command }
     try {
       setJobId(await window.api.exporter.start(project, final))
     } catch (err) {
@@ -267,6 +282,20 @@ export function ExportDialog({ onClose }: { onClose(): void }) {
                   <p className="hint blur-hint">Blends several moments of the timeline inside each frame. It blurs motion that is animated or filmed at a high frame rate; footage shot at a low frame rate stays steppy (use interpolini for that). Cost grows with Blend frames.</p>
                 </>
               )}
+              <div className="cmd" role="group" aria-label="Encoder command box">
+                <div className="cmd-head">
+                  <strong>Encoder command</strong>
+                  <span className="chip gen" title="Written by the settings above">settings</span>
+                  <span className="chip man" title="Added or changed by you; kept when the settings change">yours</span>
+                  <span className="spacer" />
+                  <button onClick={() => { setCommand(formatCommand(generated)) }} title="Drop your edits and write the command from the settings again" aria-label="Reset encoder command">Reset</button>
+                </div>
+                <textarea aria-label="Encoder command" spellCheck={false} rows={3} value={command} onChange={(e) => setCommand(e.target.value)} title="What FFmpeg gets for the video. Edit it or add options, for example -aq-mode 3. Frames come in and the file goes out; VLcut sets those." />
+                <div className="cmd-chips" aria-label="Encoder command parts">
+                  {commandParts.map((p, i) => <code key={`${p.text}-${i}`} className={p.manual ? 'chip man' : 'chip gen'}>{p.text}</code>)}
+                </div>
+                {!commandCheck.ok && <p className="notice small" role="alert">{commandCheck.error}</p>}
+              </div>
               <Row label="Loudness">
                 <label><input type="checkbox" checked={settings.normalizeAudio} onChange={(e) => set({ normalizeAudio: e.target.checked })} /> Normalise to −14 LUFS</label>
               </Row>

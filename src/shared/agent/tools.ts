@@ -95,6 +95,9 @@ export function silentRanges(project: Project, options: SilenceOptions): TimeRan
       const mine = rangesToTimeline(clip, asset.analysis.silences)
       silent.push(...mine)
       loud.push(...subtractRanges([{ start: clip.start, end: ops.clipEnd(clip) }], mine))
+      // Recognised speech is never cut, even where the sound is quiet enough to count as a pause.
+      const spoken = (asset.analysis.transcript ?? []).map((w) => ({ start: Math.max(0, w.start - 0.08), end: w.end + 0.1 }))
+      if (spoken.length) loud.push(...rangesToTimeline(clip, spoken))
     }
   }
   return subtractRanges(mergeRanges(silent), mergeRanges(loud))

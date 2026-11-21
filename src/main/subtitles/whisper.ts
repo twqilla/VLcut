@@ -16,11 +16,18 @@ import { toolPath } from '../media/tools'
 export const MODELS: Record<string, { file: string; sizeMb: number; note: string }> = {
   tiny: { file: 'ggml-tiny.bin', sizeMb: 75, note: 'Fastest, least accurate' },
   base: { file: 'ggml-base.bin', sizeMb: 142, note: 'Good balance (recommended)' },
-  small: { file: 'ggml-small.bin', sizeMb: 466, note: 'More accurate, slower' }
+  small: { file: 'ggml-small.bin', sizeMb: 466, note: 'More accurate, slower (best if words are missed)' }
 }
 const MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/'
 /** Windows build of whisper.cpp. Pinned; update together with the parser if the output format changes. */
 const WINDOWS_BINARY_URL = 'https://github.com/ggml-org/whisper.cpp/releases/download/v1.7.6/whisper-bin-x64.zip'
+
+/**
+ * Keep quiet or unclear speech instead of dropping it: whisper normally throws away a piece when it thinks
+ * there is no speech (-nth) or when it is not confident enough (-lpt, -et). The thresholds are loosened,
+ * and the audio is levelled first (above) so quiet voices reach the model at a normal volume.
+ */
+export const RECOGNITION_FLAGS = ['-nth', '0.85', '-lpt', '-2.0', '-et', '3.0']
 
 const exe = (n: string): string => (process.platform === 'win32' ? `${n}.exe` : n)
 
@@ -141,9 +148,9 @@ export async function transcribe(path: string, userDir: string, model: string, l
   const work = await mkdtemp(join(tmpdir(), 'vlcut-stt-'))
   try {
     const wav = join(work, 'audio.wav')
-    await run(toolPath('ffmpeg'), ['-y', '-v', 'error', '-i', path, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav])
+    await run(toolPath('ffmpeg'), ['-y', '-v', 'error', '-i', path, '-vn', '-ac', '1', '-ar', '16000', '-af', 'highpass=f=70,dynaudnorm=f=200:g=11:p=0.9:m=15', '-c:a', 'pcm_s16le', wav])
     await new Promise<void>((resolve, reject) => {
-      const proc = spawn(binary, ['-m', modelPath, '-f', wav, '-l', language || 'auto', '-oj', '-of', join(work, 'out'), '-ml', '1', '-sow', '-pp'])
+      const proc = spawn(binary, ['-m', modelPath, '-f', wav, '-l', language || 'auto', '-oj', '-of', join(work, 'out'), '-ml', '1', '-sow', '-pp', ...RECOGNITION_FLAGS])
       let err = ''
       proc.stderr.on('data', (d: Buffer) => {
         const text = d.toString()
