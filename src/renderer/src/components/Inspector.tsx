@@ -9,7 +9,7 @@ import { EFFECTS, FONT_CATEGORIES, TEXT_ANIMATIONS, TEXT_OUT_ANIMATIONS, TRANSIT
 import { useEditor } from '../store'
 import { player, usePlayback, usePreviewTool } from '../engine/player'
 import { formatBytes, formatDuration } from '../format'
-import { Num, Row, Section } from './fields'
+import { Group, Num, Row, Section } from './fields'
 import { loadCustomStacks, saveCustomStacks } from './Sidebar'
 import { loadCustomFonts, useCustomFonts } from '../engine/fonts'
 import { BlurSection } from './BlurSection'
@@ -475,7 +475,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
           ) : (
             <>
               <textarea value={text.content} rows={3} onChange={(e) => setText({ content: e.target.value }, 'content')} aria-label="Text content" />
-              <p className="hint">Wrap words in *asterisks* to set them in the accent font. Write {'{logo.png}'} (the name of an imported image) to place it inline as an icon.</p>
+              <p className="hint" title="Put *stars* around a word to use the accent look. Write {logo.png} (an imported image) to place the picture inline.">Tip: *word* = accent look</p>
             </>
           )}
           <Row label="Font">
@@ -485,9 +485,10 @@ function ClipPanel({ clip }: { clip: Clip }) {
           </Row>
           <Row label="Your fonts"><button onClick={() => void window.api.fonts.import().then((list) => loadCustomFonts(list)).then(() => player.invalidate())}>Add font files…</button></Row>
           <Num label="Font size" value={Math.round(text.fontSize * 1080)} min={8} max={540} step={1} onChange={(v) => setText({ fontSize: v / 1080 }, 'fontSize')} />
-          <Row label="Weight">
+          <Row label="Colour"><input type="color" value={text.color} onChange={(e) => setText({ color: e.target.value }, 'color')} /></Row>
+          <Row label="Boldness">
             <select value={text.weight} onChange={(e) => setText({ weight: Number(e.target.value) })}>
-              {[400, 500, 600, 700, 900].map((w) => <option key={w}>{w}</option>)}
+              {[[400, 'Normal'], [500, 'Medium'], [600, 'Semi-bold'], [700, 'Bold'], [900, 'Black']].map(([w, n]) => <option key={w} value={w}>{n}</option>)}
             </select>
           </Row>
           <Row label="Style">
@@ -501,8 +502,24 @@ function ClipPanel({ clip }: { clip: Clip }) {
               <option value="left">Left</option><option value="center">Centre</option><option value="right">Right</option>
             </select>
           </Row>
-          <Row label="Colour"><input type="color" value={text.color} onChange={(e) => setText({ color: e.target.value }, 'color')} /></Row>
-          <Num label="Spacing" value={text.letterSpacing} min={-0.1} max={0.6} step={0.005} onChange={(v) => setText({ letterSpacing: v }, 'ls')} />
+          <Row label="Animation in">
+            <select value={text.animation} onChange={(e) => setText({ animation: e.target.value })}>
+              {TEXT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}
+            </select>
+          </Row>
+          {text.animation === 'typewriter' && (
+            <>
+              <Num label="Typing time" value={text.typeSeconds ?? Math.round(Math.max(0.2, [...text.content].length / 26) * 10) / 10} min={0.2} max={60} step={0.1} onChange={(v) => setText({ typeSeconds: v }, 'typesec')} />
+              <Row label="Blinking cursor"><label><input type="checkbox" aria-label="Blinking cursor" checked={text.typeCursor !== false} onChange={(e) => setText({ typeCursor: e.target.checked })} /> Show a cursor after the last letter</label></Row>
+            </>
+          )}
+          <Row label="Animation out">
+            <select value={text.animationOut ?? (text.animation === 'none' ? 'none' : 'fade')} onChange={(e) => setText({ animationOut: e.target.value })} aria-label="Text exit animation">
+              {TEXT_OUT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}
+            </select>
+          </Row>
+          <Group title="Spacing and shape" hint="Letter spacing, line height, curved or tilted text">
+          <Num label="Letter spacing" value={text.letterSpacing} min={-0.1} max={0.6} step={0.005} onChange={(v) => setText({ letterSpacing: v }, 'ls')} />
           <Num label="Line height" value={text.lineHeight} min={0.7} max={2.5} onChange={(v) => setText({ lineHeight: v }, 'lh')} />
           <Row label="Layout">
             <select value={text.layout} onChange={(e) => setText({ layout: e.target.value as TextProps['layout'] })}>
@@ -511,16 +528,21 @@ function ClipPanel({ clip }: { clip: Clip }) {
           </Row>
           {text.layout === 'arc' && <Num label="Curve" value={text.curve} min={-1} max={1} onChange={(v) => setText({ curve: v }, 'curve')} />}
           <Num label="3D tilt" value={text.tilt} min={-1} max={1} onChange={(v) => setText({ tilt: v }, 'tilt')} />
-          <Row label="Animation">
-            <select value={text.animation} onChange={(e) => setText({ animation: e.target.value })}>
-              {TEXT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}
+          <Row label="Letters">
+            <span className="checks">
+              <label><input type="checkbox" checked={Boolean(text.hollow)} onChange={(e) => setText({ hollow: e.target.checked })} /> Hollow</label>
+              <label><input type="checkbox" checked={Boolean(text.vertical)} onChange={(e) => setText({ vertical: e.target.checked })} /> Vertical</label>
+            </span>
+          </Row>
+          <Num label="Stretch" value={text.stretchX ?? 1} min={0.4} max={3} onChange={(v) => setText({ stretchX: v }, 'sx')} />
+          <Row label="Distort">
+            <select value={text.distort ?? 'none'} onChange={(e) => setText({ distort: e.target.value as TextProps['distort'], distortAmount: text.distortAmount || 0.5 })} aria-label="Text distortion">
+              <option value="none">None</option><option value="wave">Wave</option><option value="bulge">Bulge</option><option value="skew">Slant</option>
             </select>
           </Row>
-          <Row label="Leave">
-            <select value={text.animationOut ?? (text.animation === 'none' ? 'none' : 'fade')} onChange={(e) => setText({ animationOut: e.target.value })} aria-label="Text exit animation">
-              {TEXT_OUT_ANIMATIONS.map((a) => <option key={a.type} value={a.type}>{a.name}</option>)}
-            </select>
-          </Row>
+          {text.distort && text.distort !== 'none' && <Num label="Distort amount" value={text.distortAmount ?? 0.5} min={0} max={1} onChange={(v) => setText({ distortAmount: v }, 'da')} />}
+          </Group>
+          <Group title="Fill" hint="Gradient, metal, gold or a picture inside the letters">
           <Row label="Fill">
             <select value={text.fillKind ?? 'solid'} onChange={(e) => setText({ fillKind: e.target.value as TextProps['fillKind'] })} aria-label="Text fill">
               <option value="solid">Solid colour</option><option value="gradient">Gradient</option><option value="metal">Metal</option><option value="chrome">Chrome</option><option value="gold">Gold</option><option value="image">Picture</option>
@@ -540,37 +562,32 @@ function ClipPanel({ clip }: { clip: Clip }) {
               </select>
             </Row>
           )}
-          <Row label="Letters">
-            <span className="checks">
-              <label><input type="checkbox" checked={Boolean(text.hollow)} onChange={(e) => setText({ hollow: e.target.checked })} /> Hollow</label>
-              <label><input type="checkbox" checked={Boolean(text.vertical)} onChange={(e) => setText({ vertical: e.target.checked })} /> Vertical</label>
-            </span>
-          </Row>
-          <Num label="Stretch" value={text.stretchX ?? 1} min={0.4} max={3} onChange={(v) => setText({ stretchX: v }, 'sx')} />
-          <Row label="Distort">
-            <select value={text.distort ?? 'none'} onChange={(e) => setText({ distort: e.target.value as TextProps['distort'], distortAmount: text.distortAmount || 0.5 })} aria-label="Text distortion">
-              <option value="none">None</option><option value="wave">Wave</option><option value="bulge">Bulge</option><option value="skew">Slant</option>
-            </select>
-          </Row>
-          {text.distort && text.distort !== 'none' && <Num label="Distort amount" value={text.distortAmount ?? 0.5} min={0} max={1} onChange={(v) => setText({ distortAmount: v }, 'da')} />}
-          <Num label="Neon glow" value={text.glowAmount ?? 0} min={0} max={1} onChange={(v) => setText({ glowAmount: v }, 'ga')} />
-          {(text.glowAmount ?? 0) > 0 && <Row label="Glow colour"><input type="color" value={text.glowColor || text.color} onChange={(e) => setText({ glowColor: e.target.value }, 'gc')} /></Row>}
-          <Num label="3D depth" value={text.extrudeDepth ?? 0} min={0} max={0.4} step={0.005} onChange={(v) => setText({ extrudeDepth: v }, 'ed')} />
-          {(text.extrudeDepth ?? 0) > 0 && (
-            <>
-              <Num label="3D angle" value={text.extrudeAngle ?? 45} min={0} max={360} step={1} onChange={(v) => setText({ extrudeAngle: v }, 'ea')} />
-              <Row label="3D colour"><input type="color" value={text.extrudeColor || '#222222'} onChange={(e) => setText({ extrudeColor: e.target.value }, 'ec')} /></Row>
-            </>
-          )}
+          </Group>
+          <Group title="Outline and shadow" hint="A line around the letters and a shadow behind them">
           <Num label="Outline" value={text.outlineWidth} min={0} max={0.3} step={0.005} onChange={(v) => setText({ outlineWidth: v }, 'ow')} />
           <Row label="Outline colour"><input type="color" value={text.outlineColor} onChange={(e) => setText({ outlineColor: e.target.value }, 'oc')} /></Row>
           <Num label="Shadow" value={text.shadow} min={0} max={1} onChange={(v) => setText({ shadow: v }, 'sh')} />
+          </Group>
+          <Group title="Glow and 3D depth" hint="Neon glow and solid 3D letters">
+          <Num label="Glow" value={text.glowAmount ?? 0} min={0} max={1} onChange={(v) => setText({ glowAmount: v }, 'ga')} />
+          {(text.glowAmount ?? 0) > 0 && <Row label="Glow colour"><input type="color" value={text.glowColor || text.color} onChange={(e) => setText({ glowColor: e.target.value }, 'gc')} /></Row>}
+          <Num label="Depth" value={text.extrudeDepth ?? 0} min={0} max={0.4} step={0.005} onChange={(v) => setText({ extrudeDepth: v }, 'ed')} />
+          {(text.extrudeDepth ?? 0) > 0 && (
+            <>
+              <Num label="Depth direction" value={text.extrudeAngle ?? 45} min={0} max={360} step={1} onChange={(v) => setText({ extrudeAngle: v }, 'ea')} />
+              <Row label="Depth colour"><input type="color" value={text.extrudeColor || '#222222'} onChange={(e) => setText({ extrudeColor: e.target.value }, 'ec')} /></Row>
+            </>
+          )}
+          </Group>
+          <Group title="Background box" hint="A coloured rectangle behind the text">
           <Row label="Box">
             <span className="checks">
               <label><input type="checkbox" checked={Boolean(text.boxColor)} onChange={(e) => setText({ boxColor: e.target.checked ? '#000000' : '' })} /> Background</label>
               {text.boxColor && <input type="color" value={text.boxColor.slice(0, 7)} onChange={(e) => setText({ boxColor: e.target.value }, 'bc')} />}
             </span>
           </Row>
+          </Group>
+          <Group title="Accent words" hint="Special look for words you put between *stars*">
           <Row label="Accent font">
             <select value={text.accentFontFamily} onChange={(e) => setText({ accentFontFamily: e.target.value })}>
               {fontOptions}
@@ -583,6 +600,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
               {text.accentColor && <input type="color" value={text.accentColor} onChange={(e) => setText({ accentColor: e.target.value }, 'ac')} />}
             </span>
           </Row>
+          </Group>
           {text.words?.length ? (
             <>
               <Row label="Spoken word"><input type="color" value={text.highlightColor} onChange={(e) => setText({ highlightColor: e.target.value }, 'hc')} /></Row>
@@ -595,6 +613,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
               <Num label="Words shown" value={text.wordsPerPage} min={0} max={12} step={1} onChange={(v) => setText({ wordsPerPage: v }, 'wpp')} />
             </>
           ) : null}
+
         </Section>
       )}
 

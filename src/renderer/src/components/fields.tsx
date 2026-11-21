@@ -1,5 +1,6 @@
 import { Icon } from './Icon'
-import { toggleSection, useUi } from '../ui'
+import { toggleGroup, toggleSection, useUi } from '../ui'
+import { HINTS } from '../hints'
 import type { ReactNode } from 'react'
 
 interface NumProps {
@@ -21,7 +22,7 @@ export function Num({ label, value, min, max, step = 0.01, onChange, after }: Nu
   }
   const shown = Math.round(value * 1000) / 1000
   return (
-    <label className="field">
+    <label className="field" title={HINTS[label]}>
       <span className="field-label">{label}</span>
       <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => set(e.target.value)} />
       <input type="number" min={min} max={max} step={step} value={shown} onChange={(e) => set(e.target.value)} />
@@ -49,9 +50,23 @@ export function Section({ title, children, actions }: { title: string; children:
 
 export function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="field">
+    <label className="field" title={HINTS[label]}>
       <span className="field-label">{label}</span>
       {children}
     </label>
+  )
+}
+
+/** A folded group of less common settings inside a section. It starts closed and remembers if you opened it. */
+export function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  const open = useUi((s) => s.openGroups.includes(title))
+  return (
+    <div className={`group ${open ? 'open' : ''}`}>
+      <button type="button" className="group-toggle" aria-expanded={open} onClick={() => toggleGroup(title)} title={hint}>
+        <Icon name={open ? 'down' : 'right'} size={11} />
+        <span>{title}</span>
+      </button>
+      {open && <div className="group-body">{children}</div>}
+    </div>
   )
 }

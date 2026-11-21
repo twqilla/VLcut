@@ -342,6 +342,10 @@ async function main() {
   check('text clip added', (await win.locator('.clip-text').count()) === 1)
   // Every text animation, fill, distortion and treatment draws without errors.
   await win.click('.clip-text')
+  check('advanced text settings start folded away in groups', (await win.locator('.group-toggle').count()) >= 5 && (await win.locator('.group.open').count()) === 0 && (await win.locator('.inspector .field:has-text("Font size")').count()) === 1)
+  check('settings explain themselves in a tooltip', ((await win.getAttribute('.inspector label.field:has-text("Font size")', 'title')) || '').length > 10)
+  const openGroups = async () => { while ((await win.locator('.group-toggle[aria-expanded="false"]').count()) > 0) await win.locator('.group-toggle[aria-expanded="false"]').first().click() }
+  await openGroups()
   const anim = win.locator('select:has(option[value="splitText"])').first()
   const errorsBeforeText = errors.length
   for (const value of await anim.locator('option').evaluateAll((os) => os.map((o) => o.value))) {
@@ -695,6 +699,7 @@ async function main() {
   await win.click('role=tab[name="Text"]')
   await win.click('.tile:has-text("Headline")')
   await win.click('role=tab[name="Properties"]')
+  await openGroups()
   await win.selectOption('.inspector .field:has-text("Layout") select', 'arc')
   await win.locator('.inspector .field:has-text("Curve") input[type=number]').fill('0.6')
   await win.locator('.inspector .field:has-text("3D tilt") input[type=number]').fill('0.4')
@@ -1447,7 +1452,7 @@ async function main() {
     await win.evaluate(() => document.activeElement && document.activeElement.blur())
     await win.keyboard.press('Control+a')
     await win.click('button:text-is("Nest")')
-    await win.waitForFunction(() => /Nested 2 clips/.test(document.querySelector('.nest-note')?.textContent ?? ''), null, { timeout: 120000 })
+    await win.waitForFunction(() => /Nested 2 clips/.test(document.querySelector('.nest-note')?.textContent ?? ''), null, { timeout: 120000 }).catch(async (e) => { throw new Error(`${e.message} (note: ${await win.textContent('.nest-note').catch(() => 'none')})`) })
     check('nesting turns two clips into one with the same length', (await win.locator('.clip-video').count()) === 1 && (await win.textContent('.timecode')) === length, `${length} -> ${await win.textContent('.timecode')}`)
     await win.waitForSelector('.clip-video')
     check('the nested clip can be unnested again', (await win.locator('button:text-is("Unnest")').isEnabled()))
@@ -1523,6 +1528,9 @@ async function main() {
     await win.click('.tile:has-text("Headline")')
     await win.waitForSelector('.text-editor', { timeout: 5000 })
     check('adding text opens the text editor window over the preview', (await win.locator('.text-editor').count()) === 1)
+    check('the text editor keeps the rarely used settings behind "More options"', (await win.locator('.text-editor .te-looks').count()) === 0 && (await win.locator('.text-editor input[aria-label="Starts at"]').count()) === 0)
+    await win.click('.text-editor .te-more')
+    check('More options shows quick styles, position and timing', (await win.locator('.text-editor .te-looks').count()) === 1 && (await win.locator('.text-editor input[aria-label="Starts at"]').count()) === 1)
     await win.fill('.text-editor textarea[aria-label="Text"]', 'Fresh words')
     check('typing in the editor changes the text on the timeline', (await win.locator('.clip-text', { hasText: 'Fresh words' }).count()) === 1)
     await win.selectOption('.text-editor select[aria-label="Font"]', 'Anton')

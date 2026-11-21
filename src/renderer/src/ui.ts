@@ -23,12 +23,14 @@ interface UiState {
   shortcutRequests: number
   /** Position editing in the preview is off until this is switched on, so a stray drag never moves a clip. */
   previewEdit: boolean
+  /** Groups of advanced settings the person has opened (they start closed). */
+  openGroups: string[]
   /** The view of the preview (1 = the whole picture fits). Kept while clips change; separate from any clip's own scale. */
   viewZoom: number
   viewX: number
   viewY: number
 }
-const VIEW = { previewEdit: false, viewZoom: 1, viewX: 0, viewY: 0 }
+const VIEW = { previewEdit: false, openGroups: [] as string[], viewZoom: 1, viewX: 0, viewY: 0 }
 
 function load(): UiState {
   try {
@@ -76,3 +78,6 @@ export function zoomView(factor: number, px = 0, py = 0): void {
   })
 }
 export const panView = (dx: number, dy: number): void => useUi.setState((s) => ({ viewX: s.viewX + dx, viewY: s.viewY + dy }))
+export function toggleGroup(key: string): void {
+  useUi.setState((s) => ({ openGroups: s.openGroups.includes(key) ? s.openGroups.filter((k) => k !== key) : [...s.openGroups, key] }))
+}
