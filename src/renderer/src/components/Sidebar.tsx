@@ -1,5 +1,5 @@
-import { Icon } from './Icon'
-import { setLibraryCollapsed, setTextEditor, useUi } from '../ui'
+import { Icon, type IconName } from './Icon'
+import { setAudioTab, setLibraryCollapsed, setTextEditor, useUi } from '../ui'
 import type { TextProps } from '@shared/types'
 import * as ops from '@shared/timeline/ops'
 import { makeClip, textClip, vizClip } from '@shared/timeline/model'
@@ -54,14 +54,18 @@ function TextTab() {
 
 function ApplyList({ items, onPick, noun }: { items: { type: string; name: string; group?: string }[]; onPick(type: string): void; noun: string }) {
   const hasSelection = useEditor((s) => s.selection.length > 0)
-  const groups = [...new Set(items.map((i) => i.group ?? ''))]
+  const [query, setQuery] = useState('')
+  const q = query.trim().toLowerCase()
+  const shown = q ? items.filter((i) => i.name.toLowerCase().includes(q) || (i.group ?? '').toLowerCase().includes(q)) : items
+  const groups = [...new Set(shown.map((i) => i.group ?? ''))]
   return (
     <div className="apply-list">
-      {!hasSelection && <p className="hint">Select a clip on the timeline, then pick {noun} to apply.</p>}
+      <input type="search" className="list-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${noun.replace(/^an? /, '')}s…`} aria-label={`Search ${noun.replace(/^an? /, '')}s`} />
+      {!hasSelection && <p className="hint">Select a clip first.</p>}
       {groups.map((g) => (
         <div key={g}>
           {g && <h3>{g}</h3>}
-          {items.filter((i) => (i.group ?? '') === g).map((i) => (
+          {shown.filter((i) => (i.group ?? '') === g).map((i) => (
             <button key={i.type} disabled={!hasSelection} onClick={() => onPick(i.type)}>{i.name}</button>
           ))}
         </div>
@@ -96,8 +100,7 @@ function StacksList() {
   return (
     <div className="apply-list stacks">
       <h3>Stacks</h3>
-      <p className="hint">Ready-made combinations. Click several to layer them; every effect stays adjustable in Properties.</p>
-      <div className="stack-grid">
+      <div className="stack-grid" title="Ready-made combinations. Click several to layer them; every effect stays adjustable in Properties.">
         {[...custom, ...EFFECT_STACKS].map((stack) => (
           <span key={stack.name} className="stack-item">
             <button disabled={!hasSelection} onClick={() => addEffectStack(stack.name, stack.effects)} title={stack.effects.map((e) => EFFECTS.find((x) => x.type === e.type)?.name).join(' + ')}>
@@ -220,16 +223,31 @@ function AudioTab() {
   const autoMute = useEditor((s) => s.autoMute)
   const hasSelection = useEditor((s) => s.selection.length > 0)
   const tool = (tool: 'duckMusic' | 'denoise' | 'syncToBeats' | 'syncToSnares' | 'removeAudio', description: string) => void runSteps(description, [{ tool, args: {}, description }])
+  const tab = useUi((u) => u.audioTab) || 'Voice'
+  const show = (name: string): boolean => tab === 'All' || tab === name
+  const TABS: [string, IconName, string][] = [['Voice', 'mic', 'Record your voice or turn text into speech'], ['Music', 'music', 'Cut to the beat, visualizer, lower music'], ['Clip', 'volume', 'Sound of the selected clips'], ['Cameras', 'film', 'Line up several cameras by sound'], ['All', 'grid', 'Everything in one long list']]
   return (
     <div className="apply-list">
+      <div className="prop-tabs" role="tablist" aria-label="Audio tools">
+        {TABS.map(([name, icon, hint]) => (
+          <button key={name} role="tab" aria-selected={tab === name} className={tab === name ? 'on' : ''} onClick={() => setAudioTab(name)} title={hint}>
+            <Icon name={icon} size={14} />
+            <span>{name}</span>
+          </button>
+        ))}
+      </div>
+      {show('Voice') && (
+        <>
+          <RecordVoice />
+          <VoiceOver />
+        </>
+      )}
+      {show('Music') && (
+        <>
       <h3>Audio visualizer</h3>
       <div className="audio-tools">
         <button onClick={() => addVisualizer()}>Add a visualizer at the playhead</button>
-        <p className="hint">A picture of the sound: bars, wave or ring that move with the music or voice under it. Change the style and colours in Properties.</p>
       </div>
-      <Multicam />
-      <RecordVoice />
-      <VoiceOver />
       <h3>Cut to the music</h3>
       <div className="audio-tools">
         <div className="row">
@@ -241,9 +259,16 @@ function AudioTab() {
           </select>
           <button className="primary" onClick={() => { const [on, every] = cutMode.split(':'); void runSteps('Auto-cut to the music', [{ tool: 'autoCutToBeat', args: { on, every: Number(every) }, description: `Cut the footage on ${on === 'snares' ? 'every snare hit' : 'the beat'}, with a slight punch-in on alternate pieces.` }]) }}>Auto-cut</button>
         </div>
-        <p className="hint">Chops the main video track at the music's beats or snares (needs music on the timeline, analysed). Clips and the playhead also snap to them: the red ticks on the ruler are snares.</p>
         <button onClick={() => tool('syncToSnares', 'Move each cut on the main track to the nearest snare hit.')}>Snap existing cuts to snares</button>
       </div>
+      <h3>Tools</h3>
+      <button onClick={() => tool('duckMusic', 'Lower the music to 22% while people speak, with smooth ramps.')}>Lower music under speech</button>
+      <button onClick={() => tool('denoise', 'Turn on noise reduction for every clip with sound (applied in the export).')}>Reduce background noise</button>
+      <button onClick={() => tool('syncToBeats', 'Move each cut on the main track to the nearest beat of the music.')}>Move cuts onto the beat</button>
+        </>
+      )}
+      {show('Clip') && (
+        <>
       <h3>Clip sound</h3>
       <div className="audio-tools">
         <button disabled={!hasSelection} onClick={() => useEditor.getState().removeAudio()} title="Keeps the picture, removes the clip's own sound">Remove audio from selected clips</button>
@@ -251,11 +276,9 @@ function AudioTab() {
         <button onClick={() => useEditor.getState().restoreAudio()} title="Puts the clips' own sound back (selected clips, or all clips when none is selected)">Bring the audio back{hasSelection ? ' on selected clips' : ' on all clips'}</button>
         <label className="check"><input type="checkbox" checked={autoMute} onChange={(e) => useEditor.getState().setAutoMute(e.target.checked)} /> Automatically remove the audio from clips I add</label>
       </div>
-      <h3>Tools</h3>
-      <button onClick={() => tool('duckMusic', 'Lower the music to 22% while people speak, with smooth ramps.')}>Lower music under speech</button>
-      <button onClick={() => tool('denoise', 'Turn on noise reduction for every clip with sound (applied in the export).')}>Reduce background noise</button>
-      <button onClick={() => tool('syncToBeats', 'Move each cut on the main track to the nearest beat of the music.')}>Move cuts onto the beat</button>
-      <p className="hint">Volume, fades and volume keyframes are in Properties when a clip is selected. Loudness normalisation is in the Export dialog.</p>
+        </>
+      )}
+      {show('Cameras') && <Multicam />}
     </div>
   )
 }

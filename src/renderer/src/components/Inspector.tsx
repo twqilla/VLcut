@@ -46,7 +46,7 @@ const TAB_SETS: Record<string, [string, string, string][]> = {
   viz: [['Visualizer', 'sliders', 'The sound bars'], ['Place', 'move', 'Position, size, timing'], ['Effects', 'sparkles', 'Effects and blending'], ['All', 'grid', 'Everything for this clip in one long list']],
   adjustment: [['Effects', 'sparkles', 'Effects and blending'], ['Place', 'move', 'Timing'], ['All', 'grid', 'Everything for this clip in one long list']],
   picture: [['Place', 'move', 'Position, size, crop, mask'], ['Time', 'gauge', 'Speed, sound, fades, transition'], ['Look', 'sliders', 'Effects, colour and blending'], ['All', 'grid', 'Everything for this clip in one long list']],
-  audio: []
+  audio: [['Sound', 'volume', 'Volume, sound effects'], ['Time', 'gauge', 'Speed and fades'], ['All', 'grid', 'Everything for this clip in one long list']]
 }
 
 function clipLabel(c: Clip, media: { id: string; name: string }[]): string {
@@ -416,7 +416,7 @@ function ClipPanel({ clip }: { clip: Clip }) {
   const tab = tabList.find(([name]) => name === storedTab)?.[0] ?? tabList[0]?.[0]
   const on = (name: string): boolean => tabList.length === 0 || tab === 'All' || tab === name
   const picture = kind === 'picture'
-  const T = { time: picture ? 'Time' : 'Place', fades: picture ? 'Time' : 'Place', look: picture ? 'Look' : 'Effects' }
+  const T = { time: picture || kind === 'audio' ? 'Time' : 'Place', fades: picture || kind === 'audio' ? 'Time' : 'Place', look: picture ? 'Look' : 'Effects', sound: kind === 'audio' ? 'Sound' : 'Time' }
 
   /** Writes an animatable value: to the keyframe at the playhead if the property is animated, else to the base value. */
   const setProp = (prop: AnimProp, value: number) =>
@@ -792,14 +792,14 @@ function ClipPanel({ clip }: { clip: Clip }) {
         </Section>
       )}
 
-      {hasSound && on(T.time) && (
+      {hasSound && on(T.sound) && (
         <Section title="Audio">
           {asset?.kind === 'video' && <Row label="Sound"><label><input type="checkbox" aria-label="Remove audio from this clip" checked={Boolean(clip.muted)} onChange={(e) => updateSelected(e.target.checked ? 'Remove audio' : 'Restore audio', () => ({ muted: e.target.checked || undefined }))} /> Remove this clip's audio</label></Row>}
           {!clip.muted && anim('volume', 'Volume', 0, 2)}
         </Section>
       )}
 
-      {hasSound && !clip.muted && !clip.freeze && on(T.time) && <AudioFxSection clip={clip} />}
+      {hasSound && !clip.muted && !clip.freeze && on(T.sound) && <AudioFxSection clip={clip} />}
 
       {on(T.fades) && (
         <Section title="Fades">

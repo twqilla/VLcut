@@ -47,7 +47,7 @@ async function main() {
   const app = await _electron.launch({ executablePath: packaged || require(path.join(root, 'node_modules/electron')), args: ['--no-sandbox', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--user-data-dir=${path.join(work, 'ud')}`, ...(packaged ? [] : [root])], cwd: root, env: { ...process.env, VLCUT_PART_FRAMES: '30', OLLAMA_HOST: `127.0.0.1:${ollama.address().port}`, VLCUT_INTERPOLINI: path.join(root, 'tests/fake/fake-interpolini-cli.cjs'), FAKE_INTERPOLINI_LOG: path.join(work, 'interpolini-calls.log') } })
   const win = await app.firstWindow()
   // The existing checks reach every setting, so they run with the "All" tab; the tab behaviour itself is checked below.
-  await win.evaluate(() => { const k = 'vlcut:ui'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o.propsTab = 'All'; localStorage.setItem(k, JSON.stringify(o)) })
+  await win.evaluate(() => { const k = 'vlcut:ui'; const o = JSON.parse(localStorage.getItem(k) || '{}'); o.propsTab = 'All'; o.audioTab = 'All'; localStorage.setItem(k, JSON.stringify(o)) })
   await win.reload()
   const errors = []
   win.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
@@ -275,6 +275,13 @@ async function main() {
   check('and unfolds again', (await win.locator('text=Position X').count()) >= 1)
   const before = await pixel()
   await win.click('role=tab[name="Effects"]')
+  {
+    const total = await win.locator('.apply-list button').count()
+    await win.fill('input[aria-label="Search effects"]', 'blur')
+    const found = await win.locator('.apply-list button').count()
+    check('the effects list can be searched', found > 0 && found < total, `${found} of ${total}`)
+    await win.fill('input[aria-label="Search effects"]', '')
+  }
   await win.click('.apply-list button:has-text("Color adjust")')
   await win.locator('.effect input[type=number]').first().fill('-0.8')
   await win.waitForTimeout(300)
@@ -712,6 +719,14 @@ async function main() {
 
   // ---- Audio tab, text layouts, custom fonts, motion-blur export ----
   await win.click('role=tab[name="Audio"]')
+  {
+    check('the Audio tab is sorted into Voice, Music, Clip and Cameras (plus All)', (await win.locator('.library .prop-tabs [role=tab]').count()) === 5)
+    await win.click('.library .prop-tabs [role=tab]:has-text("Voice")')
+    check('Voice shows recording and text to speech only', (await win.locator('textarea[aria-label="Text to speak"]').count()) === 1 && (await win.locator('button:has-text("Add a visualizer at the playhead")').count()) === 0)
+    await win.click('.library .prop-tabs [role=tab]:has-text("Music")')
+    check('Music shows the visualizer and cutting to the beat', (await win.locator('button:has-text("Add a visualizer at the playhead")').count()) === 1 && (await win.locator('textarea[aria-label="Text to speak"]').count()) === 0)
+    await win.click('.library .prop-tabs [role=tab]:has-text("All")')
+  }
   await win.fill('textarea[aria-label="Text to speak"]', 'Hello from the test')
   await win.click('button:has-text("Add voice-over at playhead")')
   await win.waitForSelector('.clip-audio', { timeout: 60000 })

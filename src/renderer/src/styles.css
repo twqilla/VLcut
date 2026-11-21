@@ -863,3 +863,4 @@ button.big { font-size: 16px; padding: 14px 28px; border-radius: 12px; box-shado
 .prop-tabs button span, .te-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prop-tabs button:hover, .te-tabs button:hover { color: var(--text, #fff); }
 .prop-tabs button.on, .te-tabs button.on { color: var(--text, #fff); border-bottom-color: var(--accent); }
+.list-search { width: calc(100% - 24px); margin: 8px 12px 4px; }
