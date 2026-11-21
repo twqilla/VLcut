@@ -864,3 +864,6 @@ button.big { font-size: 16px; padding: 14px 28px; border-radius: 12px; box-shado
 .prop-tabs button:hover, .te-tabs button:hover { color: var(--text, #fff); }
 .prop-tabs button.on, .te-tabs button.on { color: var(--text, #fff); border-bottom-color: var(--accent); }
 .list-search { width: calc(100% - 24px); margin: 8px 12px 4px; }
+/* The tab bar in the library tabs stays one row (the library lists are grids). */
+.library .apply-list > .prop-tabs { display: flex; grid-template-columns: none; gap: 2px; padding: 0 0 0; }
+.library .apply-list .prop-tabs button { width: auto; flex: 1 1 0; margin: 0; display: flex; }
