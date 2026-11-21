@@ -1148,7 +1148,11 @@ async function main() {
   await win.selectOption('select[aria-label="Easing to next keyframe"]', 'bezier')
   await win.click('button[aria-label="Edit curve"]')
   await win.click('.curve-presets button:text-is("Back out")')
-  const handle = await win.locator('circle[aria-label="Curve handle 1"]').boundingBox()
+  const handle = await win.locator('circle[aria-label="Curve handle 1"]').boundingBox({ timeout: 8000 }).catch(async (e) => {
+    const info = await win.evaluate(() => ({ pop: document.querySelectorAll('.curve-pop').length, tabs: [...document.querySelectorAll('.prop-tabs [role=tab]')].map((t) => t.textContent + (t.getAttribute('aria-selected') === 'true' ? '*' : '')), inspector: (document.querySelector('.inspector')?.textContent ?? '').slice(0, 200), selected: document.querySelectorAll('.clip.selected').length }))
+    await win.screenshot({ path: path.join(work, 'curve-fail.png') })
+    throw new Error(`${e.message.split('\n')[0]} ${JSON.stringify(info)}`)
+  })
   await win.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
   await win.mouse.down()
   await win.mouse.move(handle.x + handle.width / 2 + 30, handle.y + handle.height / 2 + 30, { steps: 4 })
