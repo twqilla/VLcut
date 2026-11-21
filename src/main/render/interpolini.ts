@@ -5,7 +5,7 @@
  */
 import { type ChildProcessWithoutNullStreams, execFile, spawn } from 'node:child_process'
 import { createWriteStream, existsSync } from 'node:fs'
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
@@ -137,8 +137,12 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
   // An older version goes into its own folder and is remembered, so the newest copy and its models stay untouched.
   const dir = join(userDir, version ? `interpolini-${version}` : 'interpolini')
   const url = version ? `https://github.com/Z1xus/interpolini/releases/download/v${version}/interpolini-windows-x86_64.zip` : WINDOWS_ZIP
-  await mkdir(dir, { recursive: true })
-  const zip = join(dir, 'interpolini.zip')
+  // Everything is unpacked into a fresh folder first. A copy that is already working is replaced only when the new one is complete,
+  // so a download that antivirus software cuts short can never leave half a program behind.
+  const staging = `${dir}.new`
+  await rm(staging, { recursive: true, force: true })
+  await mkdir(staging, { recursive: true })
+  const zip = join(staging, 'interpolini.zip')
   const res = await fetch(url, { redirect: 'follow' })
   if (!res.ok || !res.body) throw new Error(`Download failed (${res.status}) for ${url}`)
   const total = Number(res.headers.get('content-length')) || 0
@@ -151,8 +155,21 @@ export async function installInterpolini(userDir: string, onProgress: (label: st
   await pipeline(body, createWriteStream(`${zip}.part`))
   await rename(`${zip}.part`, zip)
   onProgress('Unpacking', 1)
-  await new Promise<void>((resolve, reject) => execFile('tar', ['-xf', zip, '-C', dir], (err, _o, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve())))
+  const unpackError = await new Promise<string>((resolve) => execFile('tar', ['-xf', zip, '-C', staging], (err, _o, stderr) => resolve(err ? (stderr || err.message).trim().slice(0, 300) : '')))
   await rm(zip, { force: true })
+  const exePath = await findIn(staging, 2)
+  const missing = exePath ? await missingLibraries(exePath) : [exe]
+  if (unpackError || missing.length) {
+    await rm(staging, { recursive: true, force: true })
+    const what = missing.length ? ` Missing: ${missing.map((m) => (m === exe ? exe : `${m.replace(/-$/, '')}*.dll`)).join(', ')}.` : ''
+    throw new Error(`The download could not be unpacked completely.${what}${unpackError ? ` Windows said: ${unpackError}` : ''} This usually means antivirus software blocked a file. In Windows Security → Virus & threat protection → Manage settings → Exclusions, add the folder ${dir}, then try again. Your previous copy (if any) was left as it was.`)
+  }
+  // Keep the person's own settings file when a copy is replaced.
+  const oldExe = await findIn(dir, 2)
+  const oldIni = oldExe ? join(dirname(oldExe), 'interpolini.ini') : ''
+  if (oldIni && exePath && existsSync(oldIni)) await copyFile(oldIni, join(dirname(exePath), 'interpolini.ini')).catch(() => undefined)
+  await rm(dir, { recursive: true, force: true })
+  await rename(staging, dir)
   if (version) {
     const found = await findIn(dir, 2)
     if (!found) throw new Error(`The download of version ${version} did not contain ${exe}.`)
