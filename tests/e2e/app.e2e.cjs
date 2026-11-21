@@ -1155,7 +1155,8 @@ async function main() {
   })
   await win.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
   await win.mouse.down()
-  await win.mouse.move(handle.x + handle.width / 2 + 30, handle.y + handle.height / 2 + 30, { steps: 4 })
+  // Sideways, so the pointer stays inside the little curve window (a drag that ends over a tab would click that tab).
+  await win.mouse.move(handle.x + handle.width / 2 - 24, handle.y + handle.height / 2, { steps: 4 })
   await win.mouse.up()
   const handleAfter = await win.locator('circle[aria-label="Curve handle 1"]').boundingBox()
   check('a custom easing curve can be edited by dragging its handle', Math.abs(handleAfter.x - handle.x) > 10, `${handle.x} -> ${handleAfter.x}`)
