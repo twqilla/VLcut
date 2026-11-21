@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { SpeechStatus } from '@shared/types'
 import { BUILTIN_STYLES } from '@shared/styles/styles'
+import { shiftWords } from '@shared/captions/refine'
 import { addCaptions, captionsFromSrt, exportSubtitles, forgetTranscript, removeCaptions } from '@shared/agent/tools'
 import { useEditor } from '../store'
 import { TEXT_LOOKS } from '@shared/agent/lexicon'
@@ -122,6 +123,12 @@ export function CaptionsTab() {
     apply(`Caption style: ${t.name}`, (p) => ({ ...p, tracks: p.tracks.map((tr) => ({ ...tr, clips: tr.clips.map((c) => (c.origin === 'caption' && c.text ? { ...c, text: { ...c.text, ...t.caption }, transform: { ...c.transform, y: t.captionY } } : c)) })) }))
   }
 
+  /** Moves the timing of every caption word a little (for captions that sit early or late). One undo step. */
+  const nudgeCaptions = (seconds: number): void =>
+    useEditor.getState().apply(seconds < 0 ? 'Captions earlier' : 'Captions later', (p) => ({
+      ...p,
+      tracks: p.tracks.map((t) => ({ ...t, clips: t.clips.map((c) => (c.origin === 'caption' && c.text?.words ? { ...c, text: { ...c.text, words: shiftWords(c.text.words, seconds) } } : c)) }))
+    }), { coalesce: 'caption-nudge' })
   return (
     <div className="captions-tab">
       <section>
@@ -166,6 +173,11 @@ export function CaptionsTab() {
           </button>
           {(busy || progress) && <button aria-label="Cancel" onClick={cancel}>Cancel</button>}
           <button disabled={!captionCount || busy} onClick={removeAll}>Remove all captions{captionCount ? ` (${captionCount})` : ''}</button>
+        </div>
+        <div className="row" role="group" aria-label="Caption timing">
+          <span className="dim" title="If the words show up a little early or late, move all of them">Timing</span>
+          <button disabled={!captionCount} onClick={() => nudgeCaptions(-0.05)} title="Words appear 0.05 s earlier" aria-label="Captions earlier">◀ Earlier</button>
+          <button disabled={!captionCount} onClick={() => nudgeCaptions(0.05)} title="Words appear 0.05 s later" aria-label="Captions later">Later ▶</button>
         </div>
         {!speakable.length && <p className="hint">Put footage with sound on the timeline first.</p>}
         {speakable.length > 0 && !chosen.length && <p className="hint">Tick at least one file above to use its speech.</p>}

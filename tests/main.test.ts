@@ -354,3 +354,25 @@ test('a missing library next to interpolini is found by name', async () => {
   writeFileSync(join(folder, 'swresample-6.dll'), '')
   expect(await missingLibraries(join(folder, 'interpolini-cli.exe'))).toEqual([])
 })
+
+import { refineWordTimes, shiftWords } from '../src/shared/captions/refine'
+
+test('word times from speech recognition are put in order, spread and trimmed so captions do not skip or jump early', () => {
+  // Same start time: three words share one moment, the page would jump to the last.
+  const same = refineWordTimes([{ text: 'I', start: 1, end: 1 }, { text: 'do', start: 1, end: 1 }, { text: 'think', start: 1, end: 1 }, { text: 'so', start: 1.6, end: 2 }])
+  expect(new Set(same.slice(0, 3).map((w) => w.start)).size).toBe(3)
+  expect(same[0].start).toBe(1)
+  expect(same[3].start).toBe(1.6)
+  expect(same.every((w, i) => i === 0 || w.start >= same[i - 1].start)).toBe(true)
+  // Out of order.
+  const order = refineWordTimes([{ text: 'one', start: 2, end: 2.3 }, { text: 'two', start: 1.9, end: 2.5 }])
+  expect(order[1].start).toBeGreaterThanOrEqual(order[0].start)
+  // A pause handed to the next word: it starts when it is spoken, not when the last word ended.
+  const pause = refineWordTimes([{ text: 'Hello', start: 0, end: 0.5 }, { text: 'again', start: 0.5, end: 4 }])
+  expect(pause[1].end).toBe(4)
+  expect(pause[1].start).toBeGreaterThan(3)
+  // Normal words stay where they are.
+  const normal = refineWordTimes([{ text: 'This', start: 0, end: 0.3 }, { text: 'is', start: 0.3, end: 0.5 }, { text: 'fine', start: 0.5, end: 0.9 }])
+  expect(normal.map((w) => [w.start, w.end])).toEqual([[0, 0.3], [0.3, 0.5], [0.5, 0.9]])
+  expect(shiftWords(normal, -0.05).map((w) => w.start)).toEqual([0, 0.25, 0.45])
+})

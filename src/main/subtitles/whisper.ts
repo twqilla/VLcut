@@ -12,6 +12,7 @@ import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { SpeechStatus, Word } from '@shared/types'
 import { toolPath } from '../media/tools'
+import { refineWordTimes } from '@shared/captions/refine'
 
 export const MODELS: Record<string, { file: string; sizeMb: number; note: string }> = {
   tiny: { file: 'ggml-tiny.bin', sizeMb: 75, note: 'Fastest, least accurate' },
@@ -137,7 +138,7 @@ export function parseWhisperJson(json: WhisperJson): { words: Word[]; language?:
       last.end = Math.max(last.end, end)
     } else words.push({ text, start, end: Math.max(end, start + 0.05) })
   }
-  return { words, language: json.result?.language }
+  return { words: refineWordTimes(words), language: json.result?.language }
 }
 
 export async function transcribe(path: string, userDir: string, model: string, language: string, onProgress: (fraction: number) => void): Promise<{ words: Word[]; language?: string }> {
