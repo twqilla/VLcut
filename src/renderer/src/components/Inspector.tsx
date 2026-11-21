@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { AnimProp, Clip, Easing, Mask, ShapeProps, TextProps, VizProps } from '@shared/types'
 import { DEFAULT_MASK } from '@shared/timeline/model'
 import * as ops from '@shared/timeline/ops'
@@ -188,11 +188,14 @@ function CurveEditor({ value, onChange }: { value: [number, number, number, numb
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
   }
+  // When the curve window opens near the edge of the panel, scroll it into view so its handles can be reached.
+  const pop = useRef<HTMLDivElement>(null)
+  useEffect(() => { if (open) { pop.current?.scrollIntoView({ block: 'nearest' }) } }, [open])
   return (
     <span className="curve">
       <button type="button" className={open ? 'on' : ''} aria-label="Edit curve" title="Edit the easing curve" onClick={() => setOpen(!open)}>∿</button>
       {open && (
-        <div className="curve-pop" role="dialog" aria-label="Easing curve">
+        <div className="curve-pop" role="dialog" aria-label="Easing curve" ref={pop}>
           <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H}>
             <rect x={px(0)} y={py(1)} width={px(1) - px(0)} height={py(0) - py(1)} fill="none" stroke="#2a3a5a" />
             <line x1={px(0)} y1={py(0)} x2={px(x1)} y2={py(y1)} stroke="#38b6ff" strokeOpacity={0.5} />
